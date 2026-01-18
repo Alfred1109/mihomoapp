@@ -1,0 +1,26 @@
+{
+  "name": "mihomo-manager",
+  "version": "1.0.0",
+  "description": "Mihomo (Clash Meta) proxy management application",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "cd server && npm run dev",
+    "client:dev": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "install-deps": "cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": [
+    "mihomo",
+    "clash",
+    "proxy",
+    "vpn",
+    "clash-meta"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
