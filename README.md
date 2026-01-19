@@ -1,52 +1,77 @@
 # Mihomo Manager
 
-A modern web-based management interface for Mihomo (Clash Meta) proxy.
+一个基于 Tauri + Rust + MUI 构建的 Mihomo (Clash Meta) 代理管理桌面应用程序。
 
-## Features
+## 功能特性
 
-- 📡 **Subscription Management** - Parse and manage subscription links
-- 🔄 **Node Switching** - Easy proxy node selection and switching
-- 🌐 **TUN Mode Control** - Toggle TUN mode on/off
-- ⚙️ **Service Mode** - Run as system service
-- 🎨 **Modern UI** - Clean and responsive interface built with React and Tailwind CSS
+- 🚀 订阅链接解析和管理
+- 🔄 代理节点切换
+- 🛡️ TUN 模式开关
+- ⚙️ 服务模式运行
+- 🎨 现代化 Material-UI 界面
+- ⚡ 原生桌面性能
 
-## Prerequisites
+## 技术栈
 
-- Node.js 16+ 
-- Mihomo binary installed on system
-- Administrator privileges (for TUN mode and service operations)
+- **前端**: React + TypeScript + Material-UI (MUI)
+- **后端**: Rust + Tauri
+- **代理核心**: Mihomo (Clash Meta)
 
-## Installation
+## 快速开始
 
-1. Clone the repository:
+### 前置要求
+
+- Node.js 16+
+- Rust 1.70+
+- Mihomo 二进制文件
+
+### 安装和运行
+
 ```bash
-git clone <repository-url>
-cd mihomo-manager
+# 进入应用目录
+cd tauri-app
+
+# 安装前端依赖
+npm install
+
+# 开发模式运行
+npm run tauri:dev
+
+# 生产构建
+npm run tauri:build
 ```
 
-2. Install dependencies:
-```bash
-npm run install-deps
+## 项目结构
+
+```
+mihomo-manager/
+├── tauri-app/
+│   ├── src/              # React + MUI 前端
+│   ├── src-tauri/        # Rust 后端
+│   │   ├── src/
+│   │   │   ├── main.rs           # Tauri 主程序
+│   │   │   ├── mihomo.rs         # Mihomo 服务管理
+│   │   │   ├── config.rs         # 配置管理
+│   │   │   └── subscription.rs   # 订阅管理
+│   │   └── Cargo.toml    # Rust 依赖
+│   └── package.json      # 前端依赖
+└── README.md
 ```
 
-3. Start the application:
-```bash
-npm run dev
-```
+## 架构优势
 
-The application will be available at http://localhost:3000
+- **性能**: Rust 后端提供原生性能
+- **安全**: Tauri 提供安全的桌面应用框架
+- **现代**: Material-UI 提供现代化用户界面
+- **轻量**: 相比 Electron 更小的应用体积
 
-## Configuration
+## 使用说明
 
-The application will automatically detect your Mihomo installation or you can specify the binary path in the settings.
+1. **添加订阅** - 粘贴订阅链接导入代理配置
+2. **选择节点** - 从可用代理节点中选择
+3. **配置 TUN** - 启用/禁用系统级代理的 TUN 模式
+4. **服务模式** - 以后台服务方式运行 Mihomo
 
-## Usage
-
-1. **Add Subscriptions** - Paste subscription URLs to import proxy configurations
-2. **Select Proxies** - Choose from available proxy nodes  
-3. **Configure TUN** - Enable/disable TUN mode for system-wide proxy
-4. **Service Mode** - Run Mihomo as a background service
-
-## License
+## 许可证
 
 MIT
