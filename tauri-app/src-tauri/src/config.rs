@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use yaml_rust::{Yaml, YamlLoader, YamlEmitter};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MihomoConfig {
     pub port: Option<u32>,
@@ -17,6 +18,7 @@ pub struct MihomoConfig {
     pub dns: Option<DnsConfig>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunConfig {
     pub enable: bool,
@@ -26,6 +28,7 @@ pub struct TunConfig {
     pub auto_detect_interface: Option<bool>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsConfig {
     pub enable: bool,
@@ -104,7 +107,7 @@ pub async fn set_tun_mode(enable: bool) -> Result<()> {
     save_config(config).await
 }
 
-async fn create_default_config(config_path: &PathBuf) -> Result<()> {
+async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
     let default_config = serde_json::json!({
         "port": 7890,
         "socks-port": 7891,

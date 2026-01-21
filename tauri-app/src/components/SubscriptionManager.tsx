@@ -22,6 +22,8 @@ import {
   TableRow,
   Paper,
   LinearProgress,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   Add,
@@ -44,6 +46,7 @@ interface Subscription {
   name: string;
   url: string;
   user_agent?: string;
+  use_proxy: boolean;
   created_at: string;
   last_updated: string;
   proxy_count: number;
@@ -59,6 +62,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
     name: '',
     url: '',
     userAgent: 'clash',
+    useProxy: false,
   });
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<string[]>([]);
 
@@ -85,11 +89,12 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
         name: newSubscription.name,
         url: newSubscription.url,
         userAgent: newSubscription.userAgent || null,
+        useProxy: newSubscription.useProxy,
       });
       
       showNotification('Subscription added successfully', 'success');
       setDialogOpen(false);
-      setNewSubscription({ name: '', url: '', userAgent: 'clash' });
+      setNewSubscription({ name: '', url: '', userAgent: 'clash', useProxy: false });
       loadSubscriptions();
     } catch (error) {
       showNotification(`Failed to add subscription: ${error}`, 'error');
@@ -248,16 +253,24 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip
-                          label={subscription.status}
-                          color={getStatusColor(subscription.status)}
-                          size="small"
-                        />
-                        {subscription.last_error && (
-                          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
-                            {subscription.last_error}
-                          </Typography>
-                        )}
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                          <Chip
+                            label={subscription.status}
+                            color={getStatusColor(subscription.status)}
+                            size="small"
+                          />
+                          <Chip
+                            label={subscription.use_proxy ? '使用代理' : '直连'}
+                            size="small"
+                            variant="outlined"
+                            color={subscription.use_proxy ? 'primary' : 'default'}
+                          />
+                          {subscription.last_error && (
+                            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+                              {subscription.last_error}
+                            </Typography>
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell>{subscription.proxy_count}</TableCell>
                       <TableCell>{formatDate(subscription.last_updated)}</TableCell>
@@ -345,7 +358,21 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
             variant="outlined"
             value={newSubscription.userAgent}
             onChange={(e) => setNewSubscription({ ...newSubscription, userAgent: e.target.value })}
+            sx={{ mb: 2 }}
           />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={newSubscription.useProxy}
+                onChange={(e) => setNewSubscription({ ...newSubscription, useProxy: e.target.checked })}
+                color="primary"
+              />
+            }
+            label="使用代理下载订阅"
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            如果订阅链接需要直连访问（不通过代理），请关闭此开关
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>

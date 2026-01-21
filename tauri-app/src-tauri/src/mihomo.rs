@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use tokio::process::Command as TokioCommand;
 use tokio::io::AsyncReadExt;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyGroup {
     pub name: String,
@@ -34,6 +35,7 @@ pub async fn reload_config() -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyHistory {
     pub name: String,
@@ -41,6 +43,7 @@ pub struct ProxyHistory {
     pub time: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyNode {
     pub name: String,
@@ -222,6 +225,7 @@ pub async fn switch_proxy(group_name: &str, proxy_name: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn get_traffic_stats() -> Result<serde_json::Value> {
     let client = reqwest::Client::new();
     let response = client
@@ -238,6 +242,7 @@ pub async fn get_traffic_stats() -> Result<serde_json::Value> {
     Ok(stats)
 }
 
+#[allow(dead_code)]
 pub async fn test_proxy_delay(proxy_name: &str, test_url: &str, timeout: u32) -> Result<u32> {
     let client = reqwest::Client::new();
     let response = client

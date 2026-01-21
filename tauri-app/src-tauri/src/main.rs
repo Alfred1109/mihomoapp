@@ -100,6 +100,7 @@ impl Default for AppState {
     }
 }
 
+#[allow(dead_code)]
 #[tauri::command]
 async fn get_bundled_winsw_path() -> Result<String, String> {
     // 获取应用程序目录
@@ -186,8 +187,8 @@ async fn switch_proxy(group_name: String, proxy_name: String) -> Result<String, 
 }
 
 #[tauri::command]
-async fn add_subscription(name: String, url: String, user_agent: Option<String>) -> Result<String, String> {
-    subscription::add_subscription(name, url, user_agent).await
+async fn add_subscription(name: String, url: String, user_agent: Option<String>, use_proxy: bool) -> Result<String, String> {
+    subscription::add_subscription(name, url, user_agent, use_proxy).await
         .map_err(|e| format!("Failed to add subscription: {}", e))
         .map(|_| "Subscription added successfully".to_string())
 }

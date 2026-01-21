@@ -12,17 +12,20 @@ fn build_subscription_request(
     let user_agent = subscription
         .user_agent
         .as_deref()
-        .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        .unwrap_or("clash");
 
     let mut builder = client
         .get(&subscription.url)
         .header("User-Agent", user_agent)
-        .header("Accept", "*/*");
+        .header("Accept", "*/*")
+        .header("Accept-Encoding", "gzip, deflate, br")
+        .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive");
 
     if let Ok(url) = reqwest::Url::parse(&subscription.url) {
         if let Some(host) = url.host_str() {
-            let referer = format!("{}://{}/", url.scheme(), host);
-            builder = builder.header("Referer", referer);
+            builder = builder.header("Host", host);
         }
     }
 
@@ -35,6 +38,8 @@ pub struct Subscription {
     pub name: String,
     pub url: String,
     pub user_agent: Option<String>,
+    #[serde(default)]
+    pub use_proxy: bool,
     pub created_at: String,
     pub last_updated: String,
     pub proxy_count: u32,
@@ -54,7 +59,7 @@ pub struct SubscriptionStorage {
     pub subscriptions: HashMap<String, Subscription>,
 }
 
-pub async fn add_subscription(name: String, url: String, user_agent: Option<String>) -> Result<()> {
+pub async fn add_subscription(name: String, url: String, user_agent: Option<String>, use_proxy: bool) -> Result<()> {
     let mut storage = load_subscriptions().await.unwrap_or_default();
     
     let subscription = Subscription {
@@ -62,6 +67,7 @@ pub async fn add_subscription(name: String, url: String, user_agent: Option<Stri
         name,
         url,
         user_agent,
+        use_proxy,
         created_at: chrono::Utc::now().to_rfc3339(),
         last_updated: chrono::Utc::now().to_rfc3339(),
         proxy_count: 0,
@@ -88,38 +94,58 @@ pub async fn update_subscription(id: &str) -> Result<()> {
         let subscription_clone = subscription.clone();
         save_subscriptions(&storage).await?;
         
-        // Fetch subscription content
-        match fetch_subscription_content(&subscription_clone).await {
-            Ok(proxy_count) => {
+        // Fetch and parse subscription content
+        match fetch_and_parse_subscription(&subscription_clone).await {
+            Ok(proxies) => {
+                let proxy_count = proxies.len() as u32;
+                
+                // Update subscription status
+                storage = load_subscriptions().await.unwrap_or_default();
                 if let Some(sub) = storage.subscriptions.get_mut(id) {
                     sub.status = SubscriptionStatus::Active;
                     sub.proxy_count = proxy_count;
                     sub.last_updated = chrono::Utc::now().to_rfc3339();
                     sub.last_error = None;
                 }
+                save_subscriptions(&storage).await?;
 
-                // Regenerate config with proxies from this subscription
-                if let Err(err) = generate_config_from_subscriptions(vec![id.to_string()]).await {
-                    if let Some(sub) = storage.subscriptions.get_mut(id) {
-                        sub.status = SubscriptionStatus::Error;
-                        sub.last_error = Some(format!("生成配置失败: {}", err));
+                // Regenerate config with all active subscriptions
+                let active_ids: Vec<String> = storage.subscriptions.values()
+                    .filter(|s| s.status == SubscriptionStatus::Active && s.proxy_count > 0)
+                    .map(|s| s.id.clone())
+                    .collect();
+                
+                if !active_ids.is_empty() {
+                    if let Err(err) = generate_config_from_subscriptions(active_ids).await {
+                        storage = load_subscriptions().await.unwrap_or_default();
+                        if let Some(sub) = storage.subscriptions.get_mut(id) {
+                            sub.status = SubscriptionStatus::Error;
+                            sub.last_error = Some(format!("生成配置失败: {}", err));
+                        }
+                        save_subscriptions(&storage).await?;
+                        return Err(err);
                     }
-                } else if let Err(err) = crate::mihomo::reload_config().await {
-                    if let Some(sub) = storage.subscriptions.get_mut(id) {
-                        sub.status = SubscriptionStatus::Error;
-                        sub.last_error = Some(format!("配置重载失败: {}", err));
+                    
+                    // Reload mihomo config
+                    if let Err(err) = crate::mihomo::reload_config().await {
+                        storage = load_subscriptions().await.unwrap_or_default();
+                        if let Some(sub) = storage.subscriptions.get_mut(id) {
+                            sub.last_error = Some(format!("配置重载失败: {}", err));
+                        }
+                        save_subscriptions(&storage).await?;
                     }
                 }
             }
             Err(e) => {
+                storage = load_subscriptions().await.unwrap_or_default();
                 if let Some(sub) = storage.subscriptions.get_mut(id) {
                     sub.status = SubscriptionStatus::Error;
-                    sub.last_error = Some(e.to_string());
+                    sub.last_error = Some(format!("获取订阅失败: {}", e));
                 }
+                save_subscriptions(&storage).await?;
+                return Err(e);
             }
         }
-        
-        save_subscriptions(&storage).await?;
     } else {
         return Err(anyhow::anyhow!("Subscription not found"));
     }
@@ -151,10 +177,16 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
             
             let proxies = fetch_and_parse_subscription(subscription).await?;
             for proxy in proxies {
-                proxy_names.push(proxy["name"].as_str().unwrap_or("").to_string());
-                all_proxies.push(proxy);
+                if let Some(name) = proxy["name"].as_str() {
+                    proxy_names.push(name.to_string());
+                    all_proxies.push(proxy);
+                }
             }
         }
+    }
+    
+    if all_proxies.is_empty() {
+        return Err(anyhow::anyhow!("没有找到任何代理节点"));
     }
     
     // Generate config with proxies
@@ -162,21 +194,24 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
     config["proxies"] = serde_json::json!(all_proxies);
     
     // Create or update proxy groups
-    let mut proxy_list = vec!["auto".to_string()];
-    proxy_list.extend(proxy_names.clone());
+    // PROXY group: manual selection with auto, all nodes, and DIRECT
+    let mut proxy_select_list = vec!["auto".to_string(), "DIRECT".to_string()];
+    proxy_select_list.extend(proxy_names.clone());
     
+    // auto group: automatic selection based on latency
     let proxy_groups = vec![
         serde_json::json!({
             "name": "PROXY",
             "type": "select",
-            "proxies": proxy_list
+            "proxies": proxy_select_list
         }),
         serde_json::json!({
             "name": "auto",
             "type": "url-test",
             "proxies": proxy_names.clone(),
             "url": "http://www.gstatic.com/generate_204",
-            "interval": 300
+            "interval": 300,
+            "tolerance": 50
         })
     ];
     
@@ -187,6 +222,7 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn fetch_subscription_content(subscription: &Subscription) -> Result<u32> {
     let client = reqwest::Client::builder()
         .user_agent(subscription.user_agent.as_deref().unwrap_or("clash"))
@@ -208,61 +244,129 @@ async fn fetch_subscription_content(subscription: &Subscription) -> Result<u32> 
 }
 
 async fn fetch_and_parse_subscription(subscription: &Subscription) -> Result<Vec<serde_json::Value>> {
-    let client = reqwest::Client::builder()
+    let mut client_builder = reqwest::Client::builder()
         .user_agent(subscription.user_agent.as_deref().unwrap_or("clash"))
-        .build()?;
+        .timeout(std::time::Duration::from_secs(30))
+        .danger_accept_invalid_certs(true);
+    
+    // 如果不使用代理，则禁用系统代理
+    if !subscription.use_proxy {
+        client_builder = client_builder.no_proxy();
+    }
+    
+    let client = client_builder.build()?;
     
     let response = build_subscription_request(&client, subscription)?
         .send()
         .await
-        .context("Failed to fetch subscription")?;
+        .context(format!("无法连接到订阅服务器: {}", subscription.url))?;
     
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!("HTTP {} when fetching subscription", response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow::anyhow!("订阅服务器返回错误: HTTP {}", status));
     }
     
-    let content = response.text().await?;
+    let content = response.text().await
+        .context("无法读取订阅内容")?;
+    
+    if content.is_empty() {
+        return Err(anyhow::anyhow!("订阅服务器返回空内容"));
+    }
+    
     parse_subscription_content(&content)
+        .context("订阅内容解析失败")
 }
 
 fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
+    println!("订阅原始内容长度: {} 字节", content.len());
+    println!("订阅内容前100字符: {}", &content[..content.len().min(100)]);
+    
     // Try to decode as base64 first
-    let decoded_content = if let Ok(decoded) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, content) {
-        String::from_utf8(decoded).unwrap_or_else(|_| content.to_string())
+    let decoded_content = if let Ok(decoded) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, content.trim()) {
+        match String::from_utf8(decoded) {
+            Ok(s) => {
+                println!("Base64解码成功，解码后长度: {} 字节", s.len());
+                s
+            }
+            Err(_) => {
+                println!("Base64解码后无法转换为UTF-8，使用原始内容");
+                content.to_string()
+            }
+        }
     } else {
+        println!("不是Base64编码，使用原始内容");
         content.to_string()
     };
     
-    // Parse as YAML
-    let docs = yaml_rust::YamlLoader::load_from_str(&decoded_content)
-        .context("Failed to parse subscription YAML")?;
-    
-    if let Some(doc) = docs.get(0) {
-        if let Some(proxies) = doc["proxies"].as_vec() {
-            let mut result = Vec::new();
-            for proxy in proxies {
-                if let Ok(json_proxy) = crate::config::yaml_to_json(proxy) {
-                    result.push(json_proxy);
+    // Try parsing as YAML first
+    println!("尝试解析为YAML...");
+    if let Ok(docs) = yaml_rust::YamlLoader::load_from_str(&decoded_content) {
+        println!("YAML解析成功，文档数量: {}", docs.len());
+        if let Some(doc) = docs.get(0) {
+            // Try to find proxies in the YAML structure
+            if let Some(proxies) = doc["proxies"].as_vec() {
+                println!("找到proxies字段，代理数量: {}", proxies.len());
+                let mut result = Vec::new();
+                for (i, proxy) in proxies.iter().enumerate() {
+                    match crate::config::yaml_to_json(proxy) {
+                        Ok(json_proxy) => {
+                            result.push(json_proxy);
+                        }
+                        Err(e) => {
+                            println!("代理 {} 转换失败: {}", i, e);
+                        }
+                    }
                 }
+                if !result.is_empty() {
+                    println!("成功解析 {} 个代理节点", result.len());
+                    return Ok(result);
+                } else {
+                    println!("proxies字段存在但没有有效节点");
+                }
+            } else {
+                println!("YAML中未找到proxies字段");
             }
-            return Ok(result);
         }
+    } else {
+        println!("YAML解析失败");
     }
     
-    // If YAML parsing fails, try parsing individual proxy URLs
-    let lines: Vec<&str> = decoded_content.lines().collect();
+    // If YAML parsing fails or no proxies found, try parsing individual proxy URLs
+    println!("尝试解析为代理URL列表...");
+    let lines: Vec<&str> = decoded_content.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    
+    println!("找到 {} 行非空内容", lines.len());
+    
     let mut proxies = Vec::new();
+    let mut errors = Vec::new();
     
     for line in lines {
-        if let Ok(proxy) = parse_proxy_url(line) {
-            proxies.push(proxy);
+        match parse_proxy_url(line) {
+            Ok(proxy) => proxies.push(proxy),
+            Err(e) => {
+                // Only log errors for lines that look like proxy URLs
+                if line.contains("://") {
+                    errors.push(format!("Failed to parse '{}': {}", 
+                        &line[..line.len().min(50)], e));
+                }
+            }
         }
     }
     
     if proxies.is_empty() {
-        return Err(anyhow::anyhow!("No valid proxies found in subscription"));
+        let error_msg = if errors.is_empty() {
+            format!("订阅内容中未找到有效的代理节点。内容预览:\n{}", 
+                &decoded_content[..decoded_content.len().min(500)])
+        } else {
+            format!("订阅内容中未找到有效的代理节点。解析错误:\n{}", errors.join("\n"))
+        };
+        return Err(anyhow::anyhow!(error_msg));
     }
     
+    println!("成功解析 {} 个代理URL", proxies.len());
     Ok(proxies)
 }
 
