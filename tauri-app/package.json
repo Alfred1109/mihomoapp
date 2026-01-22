@@ -21,10 +21,13 @@
     "@tauri-apps/api": "^1.5.1",
     "@tauri-apps/cli": "^1.6.3",
     "axios": "^1.6.2",
+    "i18next": "^25.8.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-i18next": "^16.5.3"
   },
   "devDependencies": {
+    "@types/node": "^25.0.10",
     "@types/react": "^18.2.15",
     "@types/react-dom": "^18.2.7",
     "@vitejs/plugin-react": "^4.0.3",

@@ -11,8 +11,13 @@ import {
   Snackbar,
   Button,
   Chip,
+  IconButton,
+  Menu,
+  MenuItem,
 } from '@mui/material';
+import { Language } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 import Dashboard from './components/Dashboard';
 import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
@@ -41,10 +46,12 @@ function TabPanel(props: TabPanelProps) {
 }
 
 function App() {
+  const { t, i18n } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
   const [mihomoStatus, setMihomoStatus] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminCheckDone, setAdminCheckDone] = useState(false);
+  const [langMenuAnchor, setLangMenuAnchor] = useState<null | HTMLElement>(null);
   const [notification, setNotification] = useState<{
     open: boolean;
     message: string;
@@ -113,12 +120,25 @@ function App() {
     if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
       try {
         await invoke('restart_as_admin');
-        // 如果到达这里说明重启失败
         showNotification('重启失败，请手动以管理员身份运行应用', 'error');
       } catch (error) {
         showNotification(`重启失败: ${error}`, 'error');
       }
     }
+  };
+
+  const handleLanguageMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setLangMenuAnchor(event.currentTarget);
+  };
+
+  const handleLanguageMenuClose = () => {
+    setLangMenuAnchor(null);
+  };
+
+  const handleLanguageChange = (lang: string) => {
+    i18n.changeLanguage(lang);
+    localStorage.setItem('language', lang);
+    handleLanguageMenuClose();
   };
 
   useEffect(() => {
@@ -135,9 +155,29 @@ function App() {
       <AppBar position="static" elevation={0}>
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Mihomo Manager
+            {t('app.title')}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <IconButton
+              color="inherit"
+              onClick={handleLanguageMenuOpen}
+              size="small"
+              title="Language"
+            >
+              <Language />
+            </IconButton>
+            <Menu
+              anchorEl={langMenuAnchor}
+              open={Boolean(langMenuAnchor)}
+              onClose={handleLanguageMenuClose}
+            >
+              <MenuItem onClick={() => handleLanguageChange('en')} selected={i18n.language === 'en'}>
+                English
+              </MenuItem>
+              <MenuItem onClick={() => handleLanguageChange('zh')} selected={i18n.language === 'zh'}>
+                中文
+              </MenuItem>
+            </Menu>
             {adminCheckDone && (
               <Chip
                 label={isAdmin ? '管理员模式' : '普通模式'}
@@ -178,7 +218,7 @@ function App() {
                 }}
               />
               <Typography variant="body2">
-                {mihomoStatus ? 'Running' : 'Stopped'}
+                {mihomoStatus ? t('dashboard.running') : t('dashboard.stopped')}
               </Typography>
             </Box>
           </Box>
@@ -188,10 +228,10 @@ function App() {
       <Container maxWidth="xl" sx={{ mt: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="mihomo manager tabs">
-            <Tab label="Dashboard" />
-            <Tab label="Subscriptions" />
-            <Tab label="Proxies" />
-            <Tab label="Configuration" />
+            <Tab label={t('app.dashboard')} />
+            <Tab label={t('app.subscription')} />
+            <Tab label={t('app.proxy')} />
+            <Tab label={t('app.config')} />
           </Tabs>
         </Box>
 
