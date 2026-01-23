@@ -43,18 +43,50 @@ pub async fn start_mihomo() -> Result<u32> {
             .context("Failed to create default config")?;
     }
     
-    // 使用应用目录下的 mihomo.exe
-    let app_dir = std::env::current_exe()
-        .context("获取应用目录失败")?
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("无法获取应用目录"))?
-        .to_path_buf();
+    // 查找 mihomo 可执行文件
+    // 优先使用系统路径，然后才查找应用目录
     
-    let mihomo_path = app_dir.join("mihomo.exe");
+    #[cfg(target_os = "windows")]
+    let mihomo_binary = "mihomo.exe";
+    #[cfg(not(target_os = "windows"))]
+    let mihomo_binary = "mihomo";
     
-    if !mihomo_path.exists() {
-        return Err(anyhow::anyhow!("未找到 mihomo.exe 文件: {}", mihomo_path.display()));
+    // 系统路径列表
+    #[cfg(target_os = "windows")]
+    let system_paths = vec![];
+    #[cfg(not(target_os = "windows"))]
+    let system_paths = vec![
+        "/usr/local/bin/mihomo",
+        "/usr/bin/mihomo",
+        "/opt/mihomo/mihomo",
+    ];
+    
+    // 首先检查系统路径
+    let mut mihomo_path = None;
+    for path in &system_paths {
+        if std::path::Path::new(path).exists() {
+            mihomo_path = Some(std::path::PathBuf::from(path));
+            break;
+        }
     }
+    
+    // 如果系统路径找不到，检查应用目录
+    if mihomo_path.is_none() {
+        let app_dir = std::env::current_exe()
+            .context("获取应用目录失败")?
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("无法获取应用目录"))?
+            .to_path_buf();
+        
+        let app_mihomo = app_dir.join(mihomo_binary);
+        if app_mihomo.exists() {
+            mihomo_path = Some(app_mihomo);
+        }
+    }
+    
+    let mihomo_path = mihomo_path.ok_or_else(|| {
+        anyhow::anyhow!("未找到 {} 文件。请确保 mihomo 已安装在系统路径或应用目录中", mihomo_binary)
+    })?;
     
     match TokioCommand::new(&mihomo_path)
         .args(["-f", &config_path])

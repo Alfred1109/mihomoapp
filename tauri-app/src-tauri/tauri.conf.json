@@ -36,13 +36,23 @@
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
-        "icons/icon.png"
+        "icons/icon.png",
+        "icons/icon.ico",
+        "icons/icon.icns"
       ],
-      "targets": ["deb"],
+      "targets": ["deb", "msi", "nsis"],
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libjavascriptcoregtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1"],
+        "depends": [],
         "files": {},
         "desktopTemplate": "mihomoapp.desktop"
+      },
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": "",
+        "webviewInstallMode": {
+          "type": "downloadBootstrapper"
+        }
       }
     },
     "systemTray": {

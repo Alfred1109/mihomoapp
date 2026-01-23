@@ -290,13 +290,23 @@ async fn restore_config_backup(backup_filename: String) -> Result<String, String
 
 #[tauri::command]
 async fn check_mihomo_binary() -> Result<String, String> {
+    // 根据平台检查不同的可执行文件
+    #[cfg(target_os = "windows")]
     let mihomo_paths = vec![
         "mihomo.exe",
-        "mihomo", 
         "clash-meta.exe",
-        "clash-meta",
         "./mihomo.exe",
-        "./mihomo"
+        "./clash-meta.exe"
+    ];
+    
+    #[cfg(not(target_os = "windows"))]
+    let mihomo_paths = vec![
+        "mihomo",
+        "clash-meta",
+        "./mihomo",
+        "./clash-meta",
+        "/usr/bin/mihomo",
+        "/usr/local/bin/mihomo"
     ];
     
     for path in mihomo_paths {
@@ -377,69 +387,76 @@ async fn restart_as_admin() -> Result<String, String> {
         let current_exe = std::env::current_exe()
             .map_err(|e| format!("获取当前程序路径失败: {}", e))?;
         
-        // 在 Linux 上，GUI程序以root权限重启比较复杂
-        // 需要保持环境变量和桌面会话访问权限
+        // 获取显示环境变量
         let display = std::env::var("DISPLAY").unwrap_or(":0".to_string());
-        let xauth = std::env::var("XAUTHORITY").ok();
+        let xauth = std::env::var("XAUTHORITY").unwrap_or_else(|_| {
+            format!("{}/.Xauthority", std::env::var("HOME").unwrap_or_default())
+        });
+        let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+        let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
         
-        // 构建命令，保持必要的环境变量
-        let mut restart_cmd = vec![];
-        restart_cmd.push("env".to_string());
-        restart_cmd.push(format!("DISPLAY={}", display));
-        if let Some(xauth_path) = xauth {
-            restart_cmd.push(format!("XAUTHORITY={}", xauth_path));
-        }
-        restart_cmd.push(current_exe.to_string_lossy().to_string());
+        // 构建启动命令（不包含 &）
+        let launch_cmd = format!(
+            "DISPLAY={} XAUTHORITY={} WAYLAND_DISPLAY={} XDG_SESSION_TYPE={} GDK_BACKEND=x11,wayland {}",
+            display, xauth, wayland_display, session_type, current_exe.display()
+        );
         
-        // 尝试不同的权限提升方式
-        let commands_to_try = vec![
-            ("pkexec", restart_cmd.clone()),
-            ("sudo", restart_cmd.clone()),
-        ];
+        // 使用 pkexec 启动新进程，整个 pkexec 在后台运行
+        let result = Command::new("bash")
+            .arg("-c")
+            .arg(format!("pkexec bash -c '{}' &", launch_cmd))
+            .spawn();
         
-        for (cmd, args) in commands_to_try {
-            match Command::new(cmd).args(&args).spawn() {
-                Ok(mut child) => {
-                    // 等待一小段时间确保新进程启动
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
-                    
-                    // 检查子进程是否还在运行
-                    match child.try_wait() {
-                        Ok(Some(_)) => {
-                            // 子进程已经退出，可能启动失败
-                            continue;
-                        }
-                        Ok(None) => {
-                            // 子进程还在运行，认为启动成功
-                            std::process::exit(0);
-                        }
-                        Err(_) => continue,
-                    }
-                }
-                Err(_) => continue,
+        match result {
+            Ok(_) => {
+                // 短暂延迟后退出，确保 bash/pkexec 进程已启动
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                Err(format!("启动失败: {}", e))
             }
         }
-        
-        Err("无法以root权限重启应用。请尝试在终端中手动使用 'sudo mihomo-manager' 运行".to_string())
     }
 }
 
 #[tauri::command]
 async fn get_bundled_mihomo_path() -> Result<String, String> {
-    // 获取应用程序目录
+    #[cfg(target_os = "windows")]
+    let mihomo_binary = "mihomo.exe";
+    #[cfg(not(target_os = "windows"))]
+    let mihomo_binary = "mihomo";
+    
+    // 系统路径列表
+    #[cfg(target_os = "windows")]
+    let system_paths: Vec<&str> = vec![];
+    #[cfg(not(target_os = "windows"))]
+    let system_paths = vec![
+        "/usr/local/bin/mihomo",
+        "/usr/bin/mihomo",
+        "/opt/mihomo/mihomo",
+    ];
+    
+    // 首先检查系统路径
+    for path in &system_paths {
+        if std::path::Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+    
+    // 如果系统路径找不到，检查应用目录
     let app_dir = std::env::current_exe()
         .map_err(|e| format!("获取应用目录失败: {}", e))?
         .parent()
         .ok_or("无法获取应用目录")?
         .to_path_buf();
     
-    // 简单方案：直接使用应用目录下的 mihomo.exe
-    let mihomo_path = app_dir.join("mihomo.exe");
+    let mihomo_path = app_dir.join(mihomo_binary);
     
     if mihomo_path.exists() {
         Ok(mihomo_path.to_string_lossy().to_string())
     } else {
-        Err(format!("未找到 mihomo.exe 文件。期望位置: {}", mihomo_path.display()))
+        Err(format!("未找到 {} 文件。请确保 mihomo 已安装在系统路径或应用目录中", mihomo_binary))
     }
 }
 
@@ -818,7 +835,10 @@ async fn get_mihomo_service_status() -> Result<String, String> {
         
         match status {
             "active" => Ok("running".to_string()),
+            "activating" => Ok("running".to_string()),  // 正在启动，视为运行中
+            "reloading" => Ok("running".to_string()),   // 重新加载，视为运行中
             "inactive" => Ok("stopped".to_string()),
+            "deactivating" => Ok("stopped".to_string()), // 正在停止，视为已停止
             "failed" => Ok("stopped".to_string()),
             _ => Ok("installed".to_string())
         }
@@ -826,6 +846,18 @@ async fn get_mihomo_service_status() -> Result<String, String> {
 }
 
 fn main() {
+    // 检测是否以 root 运行，如果是则禁用 WebView 沙箱
+    #[cfg(target_os = "linux")]
+    {
+        unsafe {
+            if libc::geteuid() == 0 {
+                // 以 root 运行时，必须禁用沙箱
+                std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+    }
+
     // 创建系统托盘菜单
     let show = CustomMenuItem::new("show".to_string(), "显示窗口");
     let hide = CustomMenuItem::new("hide".to_string(), "隐藏窗口");
@@ -930,6 +962,9 @@ fn main() {
             // Initialize application
             let window = app.get_window("main").unwrap();
             window.set_title("Mihomo Manager")?;
+            // 确保窗口显示并获得焦点
+            let _ = window.show();
+            let _ = window.set_focus();
             Ok(())
         })
         .run(tauri::generate_context!())
