@@ -53,7 +53,7 @@ pub async fn start_mihomo() -> Result<u32> {
     
     // 系统路径列表
     #[cfg(target_os = "windows")]
-    let system_paths = vec![];
+    let system_paths: Vec<&str> = vec![];
     #[cfg(not(target_os = "windows"))]
     let system_paths = vec![
         "/usr/local/bin/mihomo",
