@@ -1898,6 +1898,7 @@ dependencies = [
  "base64 0.21.7",
  "chrono",
  "dirs",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
