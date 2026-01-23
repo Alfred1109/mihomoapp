@@ -106,7 +106,7 @@ function App() {
         setAdminCheckDone(true);
         
         if (!adminStatus) {
-          showNotification('应用未以管理员身份运行，某些功能可能受限', 'warning');
+          showNotification('应用未以 root 权限运行，某些功能可能受限', 'warning');
         }
       } catch (error) {
         console.error('Failed to check admin privileges:', error);
@@ -121,7 +121,7 @@ function App() {
     if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
       try {
         await invoke('restart_as_admin');
-        showNotification('重启失败，请手动以管理员身份运行应用', 'error');
+        showNotification('重启失败，请手动使用 sudo 运行应用', 'error');
       } catch (error) {
         showNotification(`重启失败: ${error}`, 'error');
       }
@@ -181,7 +181,7 @@ function App() {
             </Menu>
             {adminCheckDone && (
               <Chip
-                label={isAdmin ? '管理员模式' : '普通模式'}
+                label={isAdmin ? 'Root 权限' : '普通权限'}
                 color={isAdmin ? 'success' : 'warning'}
                 size="small"
                 variant="filled"
@@ -195,7 +195,7 @@ function App() {
                 onClick={handleRestartAsAdmin}
                 sx={{ color: 'white', borderColor: 'white' }}
               >
-                以管理员身份重启
+                以 Root 权限重启
               </Button>
             )}
             <Box

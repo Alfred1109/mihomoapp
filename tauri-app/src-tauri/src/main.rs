@@ -371,7 +371,56 @@ async fn restart_as_admin() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Err("此功能仅在 Windows 系统上可用".to_string())
+        use std::process::Command;
+        
+        // 获取当前可执行文件路径
+        let current_exe = std::env::current_exe()
+            .map_err(|e| format!("获取当前程序路径失败: {}", e))?;
+        
+        // 在 Linux 上，GUI程序以root权限重启比较复杂
+        // 需要保持环境变量和桌面会话访问权限
+        let display = std::env::var("DISPLAY").unwrap_or(":0".to_string());
+        let xauth = std::env::var("XAUTHORITY").ok();
+        
+        // 构建命令，保持必要的环境变量
+        let mut restart_cmd = vec![];
+        restart_cmd.push("env".to_string());
+        restart_cmd.push(format!("DISPLAY={}", display));
+        if let Some(xauth_path) = xauth {
+            restart_cmd.push(format!("XAUTHORITY={}", xauth_path));
+        }
+        restart_cmd.push(current_exe.to_string_lossy().to_string());
+        
+        // 尝试不同的权限提升方式
+        let commands_to_try = vec![
+            ("pkexec", restart_cmd.clone()),
+            ("sudo", restart_cmd.clone()),
+        ];
+        
+        for (cmd, args) in commands_to_try {
+            match Command::new(cmd).args(&args).spawn() {
+                Ok(mut child) => {
+                    // 等待一小段时间确保新进程启动
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    
+                    // 检查子进程是否还在运行
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            // 子进程已经退出，可能启动失败
+                            continue;
+                        }
+                        Ok(None) => {
+                            // 子进程还在运行，认为启动成功
+                            std::process::exit(0);
+                        }
+                        Err(_) => continue,
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        
+        Err("无法以root权限重启应用。请尝试在终端中手动使用 'sudo mihomo-manager' 运行".to_string())
     }
 }
 
@@ -443,7 +492,101 @@ async fn install_mihomo_service() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Err("服务安装功能仅在 Windows 系统上可用".to_string())
+        use std::process::Command;
+        use std::fs;
+        use std::path::Path;
+
+        // 创建配置目录
+        let config_dir = dirs::config_dir()
+            .ok_or("无法获取配置目录")?
+            .join("mihomo");
+        
+        fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("创建配置目录失败: {}", e))?;
+        
+        let config_path = config_dir.join("config.yaml");
+        
+        // 如果配置文件不存在，创建默认配置
+        if !config_path.exists() {
+            crate::config::save_config(crate::mihomo::create_default_config()).await
+                .map_err(|e| format!("创建默认配置失败: {}", e))?;
+        }
+
+        // 检查 mihomo 二进制文件是否存在
+        let mihomo_path = "/usr/local/bin/mihomo";
+        if !Path::new(mihomo_path).exists() {
+            // 尝试从系统PATH中找到mihomo
+            match Command::new("which").arg("mihomo").output() {
+                Ok(output) if output.status.success() => {
+                    // mihomo exists in PATH
+                }
+                _ => {
+                    return Err("未找到 mihomo 二进制文件，请先安装 mihomo 到 /usr/local/bin/mihomo 或系统PATH中".to_string());
+                }
+            }
+        }
+
+        // 确定 mihomo 二进制文件路径
+        let mihomo_binary = if Path::new("/usr/local/bin/mihomo").exists() {
+            "/usr/local/bin/mihomo".to_string()
+        } else if Path::new("/usr/bin/mihomo").exists() {
+            "/usr/bin/mihomo".to_string()
+        } else {
+            // 尝试从PATH中找到
+            match Command::new("which").arg("mihomo").output() {
+                Ok(output) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).trim().to_string()
+                }
+                _ => "/usr/local/bin/mihomo".to_string() // 默认路径
+            }
+        };
+
+        // 创建 systemd 服务文件内容
+        let service_content = format!(r#"[Unit]
+Description=Mihomo (Clash Meta) Proxy Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={} -d {}
+Restart=always
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+"#, mihomo_binary, config_path.parent().unwrap().display());
+
+        // 写入 systemd 服务文件
+        let service_file = "/etc/systemd/system/mihomo.service";
+        fs::write(service_file, service_content)
+            .map_err(|e| format!("写入服务文件失败 (需要 root 权限): {}", e))?;
+
+        // Linux上不需要创建特定用户，使用root运行以获得必要权限
+
+        // 重新加载 systemd
+        let output = Command::new("systemctl")
+            .arg("daemon-reload")
+            .output()
+            .map_err(|e| format!("重新加载 systemd 失败: {}", e))?;
+
+        if !output.status.success() {
+            return Err("重新加载 systemd 失败".to_string());
+        }
+
+        // 启用服务
+        let output = Command::new("systemctl")
+            .args(["enable", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("启用服务失败: {}", e))?;
+
+        if output.status.success() {
+            Ok("Mihomo 服务安装并启用成功".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("启用服务失败: {}", stderr))
+        }
     }
 }
 
@@ -489,7 +632,30 @@ async fn start_mihomo_service_cmd() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Err("服务控制功能仅在 Windows 系统上可用".to_string())
+        use std::process::Command;
+        
+        // 检查服务是否存在
+        let check_output = Command::new("systemctl")
+            .args(["list-unit-files", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("检查服务失败: {}", e))?;
+        
+        if !String::from_utf8_lossy(&check_output.stdout).contains("mihomo.service") {
+            return Err("Mihomo 服务未安装，请先安装服务".to_string());
+        }
+        
+        // 启动服务
+        let output = Command::new("systemctl")
+            .args(["start", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("启动服务失败: {}", e))?;
+        
+        if output.status.success() {
+            Ok("Mihomo 服务启动成功".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("服务启动失败: {}", stderr))
+        }
     }
 }
 
@@ -524,7 +690,20 @@ async fn stop_mihomo_service_cmd() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Err("服务控制功能仅在 Windows 系统上可用".to_string())
+        use std::process::Command;
+        
+        // 停止服务
+        let output = Command::new("systemctl")
+            .args(["stop", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("停止服务失败: {}", e))?;
+        
+        if output.status.success() {
+            Ok("Mihomo 服务停止成功".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("服务停止失败: {}", stderr))
+        }
     }
 }
 
@@ -563,7 +742,30 @@ async fn uninstall_mihomo_service() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Err("服务卸载功能仅在 Windows 系统上可用".to_string())
+        use std::process::Command;
+        use std::fs;
+        
+        // 停止并禁用服务
+        let _ = Command::new("systemctl")
+            .args(["stop", "mihomo.service"])
+            .output();
+        
+        let _ = Command::new("systemctl")
+            .args(["disable", "mihomo.service"])
+            .output();
+        
+        // 删除服务文件
+        match fs::remove_file("/etc/systemd/system/mihomo.service") {
+            Ok(_) => {
+                // 重新加载 systemd
+                let _ = Command::new("systemctl")
+                    .arg("daemon-reload")
+                    .output();
+                
+                Ok("Mihomo 服务卸载成功".to_string())
+            }
+            Err(e) => Err(format!("删除服务文件失败 (需要 root 权限): {}", e))
+        }
     }
 }
 
@@ -593,7 +795,33 @@ async fn get_mihomo_service_status() -> Result<String, String> {
     
     #[cfg(not(target_os = "windows"))]
     {
-        Ok("not_supported".to_string())
+        use std::process::Command;
+        
+        // 检查服务是否安装
+        let unit_files_output = Command::new("systemctl")
+            .args(["list-unit-files", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("检查服务安装状态失败: {}", e))?;
+        
+        if !String::from_utf8_lossy(&unit_files_output.stdout).contains("mihomo.service") {
+            return Ok("not_installed".to_string());
+        }
+        
+        // 检查服务状态
+        let status_output = Command::new("systemctl")
+            .args(["is-active", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("检查服务状态失败: {}", e))?;
+        
+        let status_str = String::from_utf8_lossy(&status_output.stdout);
+        let status = status_str.trim();
+        
+        match status {
+            "active" => Ok("running".to_string()),
+            "inactive" => Ok("stopped".to_string()),
+            "failed" => Ok("stopped".to_string()),
+            _ => Ok("installed".to_string())
+        }
     }
 }
 

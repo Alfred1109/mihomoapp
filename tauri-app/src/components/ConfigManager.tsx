@@ -302,7 +302,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                 label="启用 TUN 模式"
               />
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                系统级透明代理（需要管理员权限）
+                系统级透明代理（需要 root 权限）
               </Typography>
 
               {config.tun?.enable && (
