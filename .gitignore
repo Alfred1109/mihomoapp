@@ -51,3 +51,14 @@ server/config/
 *.yaml
 *.yml
 !config.example.yaml
+
+# Build artifacts
+*.deb
+*.msi
+*.exe
+*.dmg
+*.AppImage
+
+# Temporary scripts
+test_*.sh
+*_fixed.deb
