@@ -47,7 +47,9 @@
           "libayatana-appindicator3-1",
           "libgtk-3-0"
         ],
-        "files": {},
+        "files": {
+          "resources/mihomo": "/usr/local/bin/mihomo"
+        },
         "desktopTemplate": "mihomoapp.desktop"
       },
       "windows": {
