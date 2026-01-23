@@ -122,22 +122,57 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
         "mode": "rule",
         "log-level": "info",
         "external-controller": "127.0.0.1:9090",
+        "unified-delay": true,
+        "tcp-concurrent": true,
+        "keep-alive-interval": 30,
+        "find-process-mode": "strict",
+        "global-client-fingerprint": "chrome",
         "dns": {
             "enable": true,
+            "ipv6": false,
             "listen": "0.0.0.0:53",
             "enhanced-mode": "fake-ip",
+            "fake-ip-range": "198.18.0.1/16",
+            "fake-ip-filter": [
+                "*.lan",
+                "*.local",
+                "localhost.ptlogin2.qq.com",
+                "+.srv.nintendo.net",
+                "+.stun.playstation.net",
+                "xbox.*.microsoft.com",
+                "+.xboxlive.com",
+                "+.battlenet.com.cn",
+                "+.battlenet.com",
+                "+.blzstatic.cn",
+                "+.battle.net"
+            ],
+            "default-nameserver": [
+                "223.5.5.5",
+                "119.29.29.29"
+            ],
             "nameserver": [
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
             ],
             "fallback": [
-                "https://doh.dns.sb/dns-query",
-                "https://dns.cloudflare.com/dns-query"
+                "https://1.1.1.1/dns-query",
+                "https://dns.google/dns-query"
             ],
+            "fallback-filter": {
+                "geoip": true,
+                "geoip-code": "CN",
+                "ipcidr": [
+                    "240.0.0.0/4"
+                ]
+            },
             "nameserver-policy": {
                 "geosite:cn,private,apple": [
                     "https://doh.pub/dns-query",
                     "https://dns.alidns.com/dns-query"
+                ],
+                "geosite:geolocation-!cn": [
+                    "https://1.1.1.1/dns-query",
+                    "https://dns.google/dns-query"
                 ],
                 "geosite:category-ads-all": "rcode://success"
             }
