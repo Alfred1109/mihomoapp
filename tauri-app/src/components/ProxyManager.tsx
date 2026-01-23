@@ -21,6 +21,7 @@ import {
   IconButton,
   LinearProgress,
   Alert,
+  TableSortLabel,
 } from '@mui/material';
 import {
   Refresh,
@@ -54,11 +55,16 @@ interface ProxyGroup {
   history?: Array<{ name: string; delay: number; time: string }>;
 }
 
+type SortField = 'name' | 'type' | 'delay' | 'status';
+type SortOrder = 'asc' | 'desc';
+
 const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification }) => {
   const [proxies, setProxies] = useState<{ [key: string]: ProxyNode | ProxyGroup }>({});
   const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
   const extractProxyGroups = (response: any) => {
     // Extract proxy groups, PROXY组优先
@@ -187,6 +193,47 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
     return 'error';
   };
 
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // 切换排序顺序
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // 新字段，默认升序
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const sortNodes = (nodeNames: string[]) => {
+    return [...nodeNames].sort((a, b) => {
+      const nodeA = proxies[a] as any;
+      const nodeB = proxies[b] as any;
+      
+      let compareResult = 0;
+      
+      switch (sortField) {
+        case 'name':
+          compareResult = a.localeCompare(b);
+          break;
+        case 'type':
+          compareResult = (nodeA?.type || '').localeCompare(nodeB?.type || '');
+          break;
+        case 'delay':
+          const delayA = nodeA?.history?.[0]?.delay || 999999;
+          const delayB = nodeB?.history?.[0]?.delay || 999999;
+          compareResult = delayA - delayB;
+          break;
+        case 'status':
+          const statusA = nodeA?.alive === true ? 1 : 0;
+          const statusB = nodeB?.alive === true ? 1 : 0;
+          compareResult = statusB - statusA; // 在线的排前面
+          break;
+      }
+      
+      return sortOrder === 'asc' ? compareResult : -compareResult;
+    });
+  };
+
   useEffect(() => {
     loadProxies();
     
@@ -293,15 +340,47 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
                   <Table>
                     <TableHead>
                       <TableRow>
-                        <TableCell>节点名称</TableCell>
-                        <TableCell>类型</TableCell>
-                        <TableCell>延迟</TableCell>
-                        <TableCell>状态</TableCell>
+                        <TableCell>
+                          <TableSortLabel
+                            active={sortField === 'name'}
+                            direction={sortField === 'name' ? sortOrder : 'asc'}
+                            onClick={() => handleSort('name')}
+                          >
+                            节点名称
+                          </TableSortLabel>
+                        </TableCell>
+                        <TableCell>
+                          <TableSortLabel
+                            active={sortField === 'type'}
+                            direction={sortField === 'type' ? sortOrder : 'asc'}
+                            onClick={() => handleSort('type')}
+                          >
+                            类型
+                          </TableSortLabel>
+                        </TableCell>
+                        <TableCell>
+                          <TableSortLabel
+                            active={sortField === 'delay'}
+                            direction={sortField === 'delay' ? sortOrder : 'asc'}
+                            onClick={() => handleSort('delay')}
+                          >
+                            延迟
+                          </TableSortLabel>
+                        </TableCell>
+                        <TableCell>
+                          <TableSortLabel
+                            active={sortField === 'status'}
+                            direction={sortField === 'status' ? sortOrder : 'asc'}
+                            onClick={() => handleSort('status')}
+                          >
+                            状态
+                          </TableSortLabel>
+                        </TableCell>
                         <TableCell>操作</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {group.all.map((nodeName) => {
+                      {sortNodes(group.all).map((nodeName) => {
                         const node = proxies[nodeName] as any;
                         const isActive = group.now === nodeName;
                         // 从节点自身的history字段获取最新延迟
