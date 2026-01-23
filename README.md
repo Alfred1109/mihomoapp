@@ -5,17 +5,23 @@
 ## 功能特性
 
 - 🚀 订阅链接解析和管理
-- 🔄 代理节点切换
+- 🔄 代理节点切换和延迟测试
 - 🛡️ TUN 模式开关
-- ⚙️ 服务模式运行
+- ⚙️ 服务模式运行 (systemd/Windows Service)
 - 🎨 现代化 Material-UI 界面
 - ⚡ 原生桌面性能
+- 🔐 开机自启动支持
+- 🤫 静默启动模式
+- 💾 配置备份和恢复
+- 🌍 多语言支持 (中文/English)
+- 📊 实时流量和系统状态监控
 
 ## 技术栈
 
 - **前端**: React + TypeScript + Material-UI (MUI)
 - **后端**: Rust + Tauri
-- **代理核心**: Mihomo (Clash Meta)
+- **代理核心**: Mihomo Meta v1.19.19 (with gVisor)
+- **构建工具**: Vite + Cargo
 
 ## 快速开始
 
@@ -23,7 +29,17 @@
 
 - Node.js 16+
 - Rust 1.70+
-- Mihomo 二进制文件
+- Mihomo 二进制文件 (已包含在项目中)
+
+#### Linux 系统依赖
+```bash
+sudo apt-get install -y \
+    libwebkit2gtk-4.1-dev \
+    libjavascriptcoregtk-4.1-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev
+```
 
 ### 安装和运行
 
@@ -65,13 +81,68 @@ mihomo-manager/
 - **现代**: Material-UI 提供现代化用户界面
 - **轻量**: 相比 Electron 更小的应用体积
 
+## 平台支持
+
+- ✅ **Linux** (Ubuntu 24.04+, Debian 12+)
+- ✅ **Windows** (Windows 10+)
+- ⏳ **macOS** (计划支持)
+
+## 安装
+
+### Linux (DEB 包)
+```bash
+# 下载最新版本
+wget https://github.com/Alfred1109/mihomoapp/releases/latest/download/mihomo-manager_0.1.0_amd64.deb
+
+# 安装
+sudo dpkg -i mihomo-manager_0.1.0_amd64.deb
+sudo apt-get install -f  # 自动安装依赖
+```
+
+### Windows (MSI/NSIS)
+从 [Releases](https://github.com/Alfred1109/mihomoapp/releases) 页面下载最新的 Windows 安装包。
+
 ## 使用说明
 
+### 基本功能
 1. **添加订阅** - 粘贴订阅链接导入代理配置
-2. **选择节点** - 从可用代理节点中选择
+2. **选择节点** - 从可用代理节点中选择，支持延迟测试
 3. **配置 TUN** - 启用/禁用系统级代理的 TUN 模式
 4. **服务模式** - 以后台服务方式运行 Mihomo
+
+### 高级功能
+- **开机自启** - 在配置页面启用，系统启动时自动运行
+- **静默启动** - 启动时隐藏窗口，仅显示托盘图标
+- **配置备份** - 自动备份配置文件，支持一键恢复
+- **代理测试** - 批量测试所有节点延迟
+
+## 文档
+
+- [构建指南](BUILD.md) - 详细的构建和打包说明
+- [Ubuntu 24.04 兼容性](UBUNTU_24.04_FIX.md) - Ubuntu 24.04 依赖问题解决方案
+- [Mihomo 版本信息](MIHOMO_VERSION.md) - 内核版本和更新说明
+- [平台支持](PLATFORM_SUPPORT.md) - 各平台功能支持情况
+
+## 更新日志
+
+### v0.1.0 (2026-01-24)
+- ✨ 添加开机自启和静默启动功能
+- 🔄 更新 mihomo 内核到 v1.19.19
+- 🐛 修复 Ubuntu 24.04 依赖兼容性问题
+- 📦 优化 DEB 包依赖配置
+- 🌍 添加多语言支持
+- 💾 添加配置备份和恢复功能
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
 
 ## 许可证
 
 MIT
+
+## 致谢
+
+- [Mihomo](https://github.com/MetaCubeX/mihomo) - 强大的代理内核
+- [Tauri](https://tauri.app/) - 现代化的桌面应用框架
+- [Material-UI](https://mui.com/) - 优秀的 React UI 组件库
