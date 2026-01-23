@@ -64,6 +64,8 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
   const [hasChanges, setHasChanges] = useState(false);
   const [configText, setConfigText] = useState('');
   const [tabValue, setTabValue] = useState(0);
+  const [autostart, setAutostart] = useState(false);
+  const [silentStart, setSilentStart] = useState(false);
 
   const loadConfig = async () => {
     setLoading(true);
@@ -143,8 +145,41 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
     }
   };
 
+  const loadAppSettings = async () => {
+    try {
+      const autostartStatus = await invoke<boolean>('get_autostart_status');
+      setAutostart(autostartStatus);
+      
+      const silentStatus = await invoke<boolean>('get_silent_start_status');
+      setSilentStart(silentStatus);
+    } catch (error) {
+      console.error('加载应用设置失败:', error);
+    }
+  };
+
+  const handleAutostartChange = async (checked: boolean) => {
+    try {
+      await invoke('set_autostart', { enable: checked });
+      setAutostart(checked);
+      showNotification(checked ? '已启用开机自启' : '已取消开机自启', 'success');
+    } catch (error) {
+      showNotification(`设置开机自启失败: ${error}`, 'error');
+    }
+  };
+
+  const handleSilentStartChange = async (checked: boolean) => {
+    try {
+      await invoke('set_silent_start', { enable: checked });
+      setSilentStart(checked);
+      showNotification(checked ? '已启用静默启动' : '已取消静默启动', 'success');
+    } catch (error) {
+      showNotification(`设置静默启动失败: ${error}`, 'error');
+    }
+  };
+
   useEffect(() => {
     loadConfig();
+    loadAppSettings();
   }, []);
 
   useEffect(() => {
@@ -283,6 +318,42 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                 />
                 <Typography variant="body2" color="text.secondary">
                   启用 IPv6 流量处理
+                </Typography>
+              </Box>
+
+              <Divider sx={{ my: 3 }} />
+
+              <Typography variant="h6" gutterBottom>
+                应用设置
+              </Typography>
+
+              <Box sx={{ mt: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={autostart}
+                      onChange={(e) => handleAutostartChange(e.target.checked)}
+                    />
+                  }
+                  label="开机自启"
+                />
+                <Typography variant="body2" color="text.secondary">
+                  系统启动时自动运行 Mihomo Manager
+                </Typography>
+              </Box>
+
+              <Box sx={{ mt: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={silentStart}
+                      onChange={(e) => handleSilentStartChange(e.target.checked)}
+                    />
+                  }
+                  label="静默启动"
+                />
+                <Typography variant="body2" color="text.secondary">
+                  启动时不显示窗口，仅在系统托盘显示图标
                 </Typography>
               </Box>
             </Grid>

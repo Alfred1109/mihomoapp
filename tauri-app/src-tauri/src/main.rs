@@ -787,6 +787,203 @@ async fn uninstall_mihomo_service() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn set_autostart(enable: bool) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        
+        let current_exe = std::env::current_exe()
+            .map_err(|e| format!("获取当前程序路径失败: {}", e))?;
+        
+        let app_name = "MihomoManager";
+        let reg_key = r"Software\Microsoft\Windows\CurrentVersion\Run";
+        
+        if enable {
+            // 添加到注册表
+            let output = Command::new("reg")
+                .args([
+                    "add",
+                    &format!("HKCU\\{}", reg_key),
+                    "/v",
+                    app_name,
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &format!("\"{}\"", current_exe.display()),
+                    "/f"
+                ])
+                .output()
+                .map_err(|e| format!("设置开机自启失败: {}", e))?;
+            
+            if output.status.success() {
+                Ok("已启用开机自启".to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("设置开机自启失败: {}", stderr))
+            }
+        } else {
+            // 从注册表删除
+            let output = Command::new("reg")
+                .args([
+                    "delete",
+                    &format!("HKCU\\{}", reg_key),
+                    "/v",
+                    app_name,
+                    "/f"
+                ])
+                .output()
+                .map_err(|e| format!("取消开机自启失败: {}", e))?;
+            
+            if output.status.success() || String::from_utf8_lossy(&output.stderr).contains("无法找到") {
+                Ok("已取消开机自启".to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("取消开机自启失败: {}", stderr))
+            }
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        use std::path::Path;
+        
+        let home_dir = std::env::var("HOME")
+            .map_err(|_| "无法获取 HOME 目录".to_string())?;
+        
+        let autostart_dir = Path::new(&home_dir).join(".config/autostart");
+        let desktop_file = autostart_dir.join("mihomo-manager.desktop");
+        
+        if enable {
+            // 创建 autostart 目录
+            fs::create_dir_all(&autostart_dir)
+                .map_err(|e| format!("创建 autostart 目录失败: {}", e))?;
+            
+            let current_exe = std::env::current_exe()
+                .map_err(|e| format!("获取当前程序路径失败: {}", e))?;
+            
+            // 创建 .desktop 文件
+            let desktop_content = format!(
+                "[Desktop Entry]\n\
+                Type=Application\n\
+                Name=Mihomo Manager\n\
+                Exec={}\n\
+                Hidden=false\n\
+                NoDisplay=false\n\
+                X-GNOME-Autostart-enabled=true\n",
+                current_exe.display()
+            );
+            
+            fs::write(&desktop_file, desktop_content)
+                .map_err(|e| format!("写入 desktop 文件失败: {}", e))?;
+            
+            Ok("已启用开机自启".to_string())
+        } else {
+            // 删除 .desktop 文件
+            if desktop_file.exists() {
+                fs::remove_file(&desktop_file)
+                    .map_err(|e| format!("删除 desktop 文件失败: {}", e))?;
+            }
+            Ok("已取消开机自启".to_string())
+        }
+    }
+    
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        Err("当前平台不支持开机自启功能".to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_autostart_status() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        
+        let app_name = "MihomoManager";
+        let reg_key = r"Software\Microsoft\Windows\CurrentVersion\Run";
+        
+        let output = Command::new("reg")
+            .args([
+                "query",
+                &format!("HKCU\\{}", reg_key),
+                "/v",
+                app_name
+            ])
+            .output()
+            .map_err(|e| format!("查询开机自启状态失败: {}", e))?;
+        
+        Ok(output.status.success())
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        use std::path::Path;
+        
+        let home_dir = std::env::var("HOME")
+            .map_err(|_| "无法获取 HOME 目录".to_string())?;
+        
+        let desktop_file = Path::new(&home_dir)
+            .join(".config/autostart/mihomo-manager.desktop");
+        
+        Ok(desktop_file.exists())
+    }
+    
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+async fn set_silent_start(enable: bool) -> Result<String, String> {
+    // 保存静默启动设置到配置文件
+    let config_dir = dirs::config_dir()
+        .ok_or("无法获取配置目录")?;
+    
+    let app_config_dir = config_dir.join("mihomo-manager");
+    std::fs::create_dir_all(&app_config_dir)
+        .map_err(|e| format!("创建配置目录失败: {}", e))?;
+    
+    let settings_file = app_config_dir.join("settings.json");
+    
+    let settings = serde_json::json!({
+        "silent_start": enable
+    });
+    
+    std::fs::write(&settings_file, serde_json::to_string_pretty(&settings).unwrap())
+        .map_err(|e| format!("保存设置失败: {}", e))?;
+    
+    if enable {
+        Ok("已启用静默启动".to_string())
+    } else {
+        Ok("已取消静默启动".to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_silent_start_status() -> Result<bool, String> {
+    let config_dir = match dirs::config_dir() {
+        Some(dir) => dir,
+        None => return Ok(false),
+    };
+    
+    let settings_file = config_dir.join("mihomo-manager/settings.json");
+    
+    if !settings_file.exists() {
+        return Ok(false);
+    }
+    
+    let content = std::fs::read_to_string(&settings_file)
+        .map_err(|e| format!("读取设置失败: {}", e))?;
+    
+    let settings: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析设置失败: {}", e))?;
+    
+    Ok(settings["silent_start"].as_bool().unwrap_or(false))
+}
+
+#[tauri::command]
 async fn get_mihomo_service_status() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -956,15 +1153,41 @@ fn main() {
             start_mihomo_service_cmd,
             stop_mihomo_service_cmd,
             uninstall_mihomo_service,
-            get_mihomo_service_status
+            get_mihomo_service_status,
+            set_autostart,
+            get_autostart_status,
+            set_silent_start,
+            get_silent_start_status
         ])
         .setup(|app| {
             // Initialize application
             let window = app.get_window("main").unwrap();
             window.set_title("Mihomo Manager")?;
-            // 确保窗口显示并获得焦点
-            let _ = window.show();
-            let _ = window.set_focus();
+            
+            // 检查是否启用静默启动
+            let config_dir = dirs::config_dir();
+            let mut silent_start = false;
+            
+            if let Some(dir) = config_dir {
+                let settings_file = dir.join("mihomo-manager/settings.json");
+                if settings_file.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&settings_file) {
+                        if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&content) {
+                            silent_start = settings["silent_start"].as_bool().unwrap_or(false);
+                        }
+                    }
+                }
+            }
+            
+            if silent_start {
+                // 静默启动：隐藏窗口，只显示托盘图标
+                let _ = window.hide();
+            } else {
+                // 正常启动：显示窗口并获得焦点
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            
             Ok(())
         })
         .run(tauri::generate_context!())
