@@ -64,7 +64,6 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
     userAgent: 'clash',
     useProxy: false,
   });
-  const [selectedSubscriptions, setSelectedSubscriptions] = useState<string[]>([]);
 
   const loadSubscriptions = async () => {
     setLoading(true);
@@ -126,16 +125,21 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
   };
 
   const handleGenerateConfig = async () => {
-    if (selectedSubscriptions.length === 0) {
-      showNotification('请至少选择一个订阅', 'error');
+    // 自动使用所有活跃的订阅
+    const activeSubscriptions = subscriptions
+      .filter(s => s.status === 'Active')
+      .map(s => s.id);
+    
+    if (activeSubscriptions.length === 0) {
+      showNotification('没有活跃的订阅，请先添加并更新订阅', 'error');
       return;
     }
 
     try {
       await invoke('generate_config_from_subscriptions', {
-        subscriptionIds: selectedSubscriptions,
+        subscriptionIds: activeSubscriptions,
       });
-      showNotification('配置生成成功', 'success');
+      showNotification(`配置生成成功！已合并 ${activeSubscriptions.length} 个订阅`, 'success');
     } catch (error) {
       showNotification(`生成配置失败: ${error}`, 'error');
     }
