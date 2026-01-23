@@ -308,29 +308,6 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
         </CardContent>
       </Card>
 
-      {/* Quick Actions */}
-      {subscriptions.length > 0 && (
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              {t('subscription.quickActions')}
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<CloudDownload />}
-              onClick={handleGenerateConfig}
-              disabled={subscriptions.filter(s => s.status === 'Active').length === 0}
-              fullWidth
-            >
-              {t('subscription.generateConfig')}
-            </Button>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-              {t('subscription.generateConfigDesc')}
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Add Subscription Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{t('subscription.addDialogTitle')}</DialogTitle>

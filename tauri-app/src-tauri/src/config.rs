@@ -102,6 +102,12 @@ pub async fn set_tun_mode(enable: bool) -> Result<()> {
         if config["tun"]["auto-detect-interface"].is_null() {
             config["tun"]["auto-detect-interface"] = serde_json::json!(true);
         }
+        if config["tun"]["dns-hijack"].is_null() {
+            config["tun"]["dns-hijack"] = serde_json::json!(["any:53"]);
+        }
+        if config["tun"]["mtu"].is_null() {
+            config["tun"]["mtu"] = serde_json::json!(1500);
+        }
     }
     
     save_config(config).await
@@ -133,7 +139,9 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             "enable": false,
             "stack": "system",
             "auto-route": true,
-            "auto-detect-interface": true
+            "auto-detect-interface": true,
+            "dns-hijack": ["any:53"],
+            "mtu": 1500
         },
         "proxies": [],
         "proxy-groups": [],
