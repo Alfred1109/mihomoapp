@@ -36,6 +36,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNoti
   const [tunMode, setTunMode] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
+  const [totalProxies, setTotalProxies] = useState(0);
+  const [onlineProxies, setOnlineProxies] = useState(0);
 
   useEffect(() => {
     loadSystemStatus();
@@ -56,7 +58,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNoti
           try {
             const proxiesData = await invoke<any>('get_proxies');
             if (proxiesData.proxies) {
-              const proxyList: ProxyInfo[] = Object.entries(proxiesData.proxies)
+              const allProxies: ProxyInfo[] = Object.entries(proxiesData.proxies)
                 .filter(([name, proxy]: [string, any]) => {
                   const excludeTypes = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'];
                   const excludeNames = ['DIRECT', 'REJECT', 'COMPATIBLE', 'PASS', 'REJECT-DROP'];
@@ -66,10 +68,15 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNoti
                   name,
                   type: proxy.type,
                   delay: proxy.history?.[0]?.delay || null,
-                  alive: proxy.alive !== false,
-                }))
-                .slice(0, 5);
-              setProxies(proxyList);
+                  alive: proxy.alive === true,
+                }));
+              
+              // 统计所有节点
+              setTotalProxies(allProxies.length);
+              setOnlineProxies(allProxies.filter(p => p.alive).length);
+              
+              // 只显示前5个节点
+              setProxies(allProxies.slice(0, 5));
             }
           } catch (error) {
             console.error('Failed to load proxies:', error);
@@ -183,13 +190,13 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNoti
               </Box>
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <Chip
-                  label={`节点总数: ${proxies.length}`}
+                  label={`节点总数: ${totalProxies}`}
                   size="small"
                   variant="outlined"
                   color="primary"
                 />
                 <Chip
-                  label={`在线: ${proxies.filter(p => p.alive).length}`}
+                  label={`在线: ${onlineProxies}`}
                   size="small"
                   variant="outlined"
                   color="success"
