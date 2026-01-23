@@ -147,7 +147,14 @@ pub fn create_default_config() -> serde_json::Value {
             "nameserver": [
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
-            ]
+            ],
+            "nameserver-policy": {
+                "geosite:cn,private,apple": [
+                    "https://doh.pub/dns-query",
+                    "https://dns.alidns.com/dns-query"
+                ],
+                "geosite:category-ads-all": "rcode://success"
+            }
         },
         "tun": {
             "enable": false,
@@ -165,8 +172,16 @@ pub fn create_default_config() -> serde_json::Value {
             "IP-CIDR,172.16.0.0/12,DIRECT", 
             "IP-CIDR,192.168.0.0/16,DIRECT",
             "IP-CIDR,10.0.0.0/8,DIRECT",
-            "GEOIP,LAN,DIRECT",
-            "GEOIP,CN,DIRECT",
+            "GEOSITE,private,DIRECT",
+            "GEOSITE,cn,DIRECT",
+            "GEOSITE,category-ads-all,REJECT",
+            "GEOSITE,apple-cn,DIRECT",
+            "GEOSITE,microsoft@cn,DIRECT",
+            "GEOSITE,steam@cn,DIRECT",
+            "GEOSITE,category-games@cn,DIRECT",
+            "GEOSITE,geolocation-!cn,PROXY",
+            "GEOIP,LAN,DIRECT,no-resolve",
+            "GEOIP,CN,DIRECT,no-resolve",
             "MATCH,PROXY"
         ]
     })

@@ -133,7 +133,14 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             "fallback": [
                 "https://doh.dns.sb/dns-query",
                 "https://dns.cloudflare.com/dns-query"
-            ]
+            ],
+            "nameserver-policy": {
+                "geosite:cn,private,apple": [
+                    "https://doh.pub/dns-query",
+                    "https://dns.alidns.com/dns-query"
+                ],
+                "geosite:category-ads-all": "rcode://success"
+            }
         },
         "tun": {
             "enable": false,
@@ -153,8 +160,16 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             "IP-CIDR,10.0.0.0/8,DIRECT",
             "IP-CIDR,17.0.0.0/8,DIRECT",
             "IP-CIDR,100.64.0.0/10,DIRECT",
-            "GEOIP,LAN,DIRECT",
-            "GEOIP,CN,DIRECT",
+            "GEOSITE,private,DIRECT",
+            "GEOSITE,cn,DIRECT",
+            "GEOSITE,category-ads-all,REJECT",
+            "GEOSITE,apple-cn,DIRECT",
+            "GEOSITE,microsoft@cn,DIRECT",
+            "GEOSITE,steam@cn,DIRECT",
+            "GEOSITE,category-games@cn,DIRECT",
+            "GEOSITE,geolocation-!cn,PROXY",
+            "GEOIP,LAN,DIRECT,no-resolve",
+            "GEOIP,CN,DIRECT,no-resolve",
             "MATCH,PROXY"
         ]
     });
