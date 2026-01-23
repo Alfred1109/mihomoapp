@@ -36,6 +36,7 @@ import {
   Update,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 
 interface SubscriptionManagerProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
@@ -55,6 +56,7 @@ interface Subscription {
 }
 
 const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotification }) => {
+  const { t } = useTranslation();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -183,7 +185,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
     <Box>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Subscription Manager</Typography>
+        <Typography variant="h5">{t('subscription.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             variant="outlined"
@@ -191,14 +193,14 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
             onClick={loadSubscriptions}
             disabled={loading}
           >
-            Refresh
+            {t('subscription.refresh')}
           </Button>
           <Button
             variant="contained"
             startIcon={<Add />}
             onClick={() => setDialogOpen(true)}
           >
-            Add Subscription
+            {t('subscription.add')}
           </Button>
         </Box>
       </Box>
@@ -212,13 +214,13 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Link sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
               <Typography variant="h6" gutterBottom>
-                No Subscriptions
+                {t('subscription.noSubscriptions')}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                Add your first subscription to get started
+                {t('subscription.noSubscriptionsDesc')}
               </Typography>
               <Button variant="contained" startIcon={<Add />} onClick={() => setDialogOpen(true)}>
-                Add Subscription
+                {t('subscription.add')}
               </Button>
             </Box>
           ) : (
@@ -226,12 +228,12 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>URL</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Proxies</TableCell>
-                    <TableCell>Last Updated</TableCell>
-                    <TableCell>Actions</TableCell>
+                    <TableCell>{t('subscription.name')}</TableCell>
+                    <TableCell>{t('subscription.url')}</TableCell>
+                    <TableCell>{t('subscription.status')}</TableCell>
+                    <TableCell>{t('subscription.proxies')}</TableCell>
+                    <TableCell>{t('subscription.lastUpdated')}</TableCell>
+                    <TableCell>{t('subscription.actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -283,14 +285,14 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
                           <IconButton
                             size="small"
                             onClick={() => handleUpdateSubscription(subscription.id)}
-                            title="Update"
+                            title={t('subscription.update')}
                           >
                             <Refresh />
                           </IconButton>
                           <IconButton
                             size="small"
                             onClick={() => handleDeleteSubscription(subscription.id, subscription.name)}
-                            title="Delete"
+                            title={t('subscription.delete')}
                             color="error"
                           >
                             <Delete />
@@ -311,7 +313,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
         <Card>
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              Quick Actions
+              {t('subscription.quickActions')}
             </Typography>
             <Button
               variant="contained"
@@ -320,10 +322,10 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
               disabled={subscriptions.filter(s => s.status === 'Active').length === 0}
               fullWidth
             >
-              Generate Config from All Active Subscriptions
+              {t('subscription.generateConfig')}
             </Button>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-              This will merge all active subscriptions and update your mihomo configuration
+              {t('subscription.generateConfigDesc')}
             </Typography>
           </CardContent>
         </Card>
@@ -331,15 +333,15 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
 
       {/* Add Subscription Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add New Subscription</DialogTitle>
+        <DialogTitle>{t('subscription.addDialogTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>
-            Add a new proxy subscription URL to import configurations
+            {t('subscription.addDialogDesc')}
           </DialogContentText>
           <TextField
             autoFocus
             margin="dense"
-            label="Subscription Name"
+            label={t('subscription.subscriptionName')}
             fullWidth
             variant="outlined"
             value={newSubscription.name}
@@ -348,7 +350,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
           />
           <TextField
             margin="dense"
-            label="Subscription URL"
+            label={t('subscription.subscriptionUrl')}
             fullWidth
             variant="outlined"
             value={newSubscription.url}
@@ -357,7 +359,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
           />
           <TextField
             margin="dense"
-            label="User Agent"
+            label={t('subscription.userAgent')}
             fullWidth
             variant="outlined"
             value={newSubscription.userAgent}
@@ -372,16 +374,16 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
                 color="primary"
               />
             }
-            label="使用代理下载订阅"
+            label={t('subscription.useProxy')}
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            如果订阅链接需要直连访问（不通过代理），请关闭此开关
+            {t('subscription.useProxyDesc')}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setDialogOpen(false)}>{t('subscription.cancel')}</Button>
           <Button onClick={handleAddSubscription} variant="contained">
-            Add
+            {t('subscription.add')}
           </Button>
         </DialogActions>
       </Dialog>
