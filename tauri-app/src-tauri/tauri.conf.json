@@ -42,7 +42,19 @@
         "resources/mihomo.exe",
         "resources/winsw.exe"
       ],
-      "targets": ["nsis"]
+      "targets": ["nsis"],
+      "windows": {
+        "nsis": {
+          "installerIcon": "icons/icon.ico",
+          "installMode": "perMachine",
+          "languages": ["SimpChinese"],
+          "displayLanguageSelector": false
+        }
+      }
+    },
+    "systemTray": {
+      "iconPath": "icons/icon.ico",
+      "iconAsTemplate": true
     },
     "windows": [
       {

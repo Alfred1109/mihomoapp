@@ -20,6 +20,7 @@ import {
   Chip,
   IconButton,
   LinearProgress,
+  Alert,
 } from '@mui/material';
 import {
   Refresh,
@@ -31,6 +32,7 @@ import {
   SignalWifiOff,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { proxyCache, defer } from '../utils/performance';
 
 interface ProxyManagerProps {
   isRunning: boolean;
@@ -58,34 +60,102 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
+  const extractProxyGroups = (response: any) => {
+    // Extract proxy groups, PROXY组优先
+    // 过滤掉mihomo内置的冗余组和auto组（auto组通过PROXY组选择即可）
+    const excludeBuiltinGroups = ['GLOBAL', 'COMPATIBLE', 'PASS', 'DIRECT', 'REJECT', 'REJECT-DROP', 'auto'];
+    const proxyGroups: ProxyGroup[] = [];
+    Object.entries(response.proxies || {}).forEach(([name, proxy]: [string, any]) => {
+      if ((proxy.type === 'Selector' || proxy.type === 'URLTest' || proxy.type === 'Fallback') 
+          && !excludeBuiltinGroups.includes(name)) {
+        proxyGroups.push({
+          name,
+          type: proxy.type,
+          now: proxy.now,
+          all: proxy.all || [],
+          history: proxy.history || []
+        });
+      }
+    });
+    
+    // 将PROXY组排在最前面
+    proxyGroups.sort((a, b) => {
+      if (a.name === 'PROXY') return -1;
+      if (b.name === 'PROXY') return 1;
+      return 0;
+    });
+    
+    setGroups(proxyGroups);
+    // 始终选中PROXY组（因为移除了卡片选择）
+    if (proxyGroups.length > 0) {
+      setSelectedGroup('PROXY');
+    }
+  };
+
   const loadProxies = async () => {
     if (!isRunning) return;
+    
+    // 检查缓存
+    const cached = proxyCache.get('proxies');
+    if (cached) {
+      setProxies(cached.proxies || {});
+      // 从缓存中提取代理组
+      extractProxyGroups(cached);
+      // 使用缓存数据后，异步更新
+      defer(async () => {
+        try {
+          const response = await invoke<any>('get_proxies');
+          proxyCache.set('proxies', response);
+          setProxies(response.proxies || {});
+          extractProxyGroups(response);
+        } catch (error) {
+          console.error('Background proxy update failed:', error);
+        }
+      }, 100);
+      return;
+    }
     
     setLoading(true);
     try {
       const response = await invoke<any>('get_proxies');
+      proxyCache.set('proxies', response);
       setProxies(response.proxies || {});
-      
-      // Extract proxy groups
-      const proxyGroups: ProxyGroup[] = [];
-      Object.entries(response.proxies || {}).forEach(([name, proxy]: [string, any]) => {
-        if (proxy.type === 'Selector' || proxy.type === 'URLTest' || proxy.type === 'Fallback') {
-          proxyGroups.push({
-            name,
-            type: proxy.type,
-            now: proxy.now,
-            all: proxy.all || [],
-            history: proxy.history || []
-          });
-        }
-      });
-      
-      setGroups(proxyGroups);
-      if (proxyGroups.length > 0 && !selectedGroup) {
-        setSelectedGroup(proxyGroups[0].name);
-      }
+      extractProxyGroups(response);
     } catch (error) {
-      showNotification(`Failed to load proxies: ${error}`, 'error');
+      showNotification(`加载代理失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const testGroupDelay = async (groupName: string) => {
+    try {
+      setLoading(true);
+      await invoke('test_group_delay', { groupName });
+      // Reload proxies to get updated delay info
+      await loadProxies();
+      showNotification(`延迟测试完成: ${groupName}`, 'success');
+    } catch (error) {
+      console.error(`Failed to test delay for group ${groupName}:`, error);
+      showNotification(`延迟测试失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTestAllProxies = async () => {
+    try {
+      setLoading(true);
+      showNotification('开始批量测速，请稍候...', 'info');
+      const result = await invoke<any>('test_all_proxies', { 
+        testUrl: 'http://1.1.1.1',
+        timeout: 5000 
+      });
+      // 直接刷新列表，不弹窗
+      await loadProxies();
+      showNotification(`批量测速完成！成功测试 ${result.success}/${result.total} 个节点`, 'success');
+    } catch (error) {
+      showNotification(`批量测速失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -95,10 +165,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
     try {
       setLoading(true);
       await invoke('switch_proxy', { groupName, proxyName });
-      showNotification('Proxy switched successfully', 'success');
+      showNotification('代理切换成功', 'success');
       await loadProxies(); // Refresh data
     } catch (error) {
-      showNotification(`Failed to switch proxy: ${error}`, 'error');
+      showNotification(`切换代理失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -121,7 +191,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
     loadProxies();
     
     if (isRunning) {
-      const interval = setInterval(loadProxies, 10000); // Refresh every 10 seconds
+      // 延长刷新间隔到30秒，减少不必要的API调用
+      const interval = setInterval(loadProxies, 30000);
       return () => clearInterval(interval);
     }
   }, [isRunning]);
@@ -132,10 +203,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
         <CardContent sx={{ textAlign: 'center', py: 8 }}>
           <SignalWifiOff sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="h6" gutterBottom>
-            Proxy Service Not Running
+            代理服务未运行
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Start the mihomo service to manage proxy nodes and groups
+            请启动 Mihomo 服务以管理代理节点和组
           </Typography>
         </CardContent>
       </Card>
@@ -146,72 +217,71 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
     <Box>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Proxy Manager</Typography>
-        <Button
-          variant="outlined"
-          startIcon={<Refresh />}
-          onClick={loadProxies}
-          disabled={loading}
-        >
-          Refresh
-        </Button>
+        <Typography variant="h5">代理管理</Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<Speed />}
+            onClick={handleTestAllProxies}
+            disabled={!isRunning || loading}
+          >
+            批量测速
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Refresh />}
+            onClick={loadProxies}
+            disabled={!isRunning || loading}
+          >
+            刷新
+          </Button>
+        </Box>
       </Box>
 
       {loading && <LinearProgress sx={{ mb: 2 }} />}
 
-      {/* Proxy Groups Overview */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        {groups.map((group) => (
-          <Grid item xs={12} md={6} lg={4} key={group.name}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="h6">{group.name}</Typography>
-                  <Chip label={group.type} size="small" variant="outlined" />
-                </Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Current: {group.now || 'None'}
-                </Typography>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Available Nodes: {group.all.length}
-                  </Typography>
-                  {group.now && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckCircle sx={{ fontSize: 16, color: 'success.main' }} />
-                      <Typography variant="body2">Active</Typography>
-                    </Box>
-                  )}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+      {/* PROXY组状态信息 */}
+      {groups.length > 0 && groups[0].name === 'PROXY' && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+              PROXY 主代理组
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              • 当前选择：<strong>{groups[0].now || '无'}</strong>
+              {groups[0].now === 'auto' && ' - 自动测速并选择延迟最低的节点'}
+              {groups[0].now !== 'auto' && groups[0].now && groups[0].now !== 'DIRECT' && ' - 固定使用此节点'}
+              {groups[0].now === 'DIRECT' && ' - 直连模式（不使用代理）'}
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              • 可用节点：{groups[0].all?.length || 0} 个
+              {groups[0].now !== 'auto' && ' | 如需自动选择最快节点，请在下方选择 "auto"'}
+              {groups[0].now === 'auto' && ' | 如需固定使用某个节点，请在下方直接选择'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              💡 提示：所有流量都通过PROXY组，选择合适的节点以获得最佳体验
+            </Typography>
+          </Box>
+        </Alert>
+      )}
 
       {/* Detailed Proxy Management */}
       {groups.length > 0 && (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Node Management
-            </Typography>
-            
-            {/* Group Selector */}
-            <FormControl sx={{ minWidth: 200, mb: 3 }}>
-              <InputLabel>Proxy Group</InputLabel>
-              <Select
-                value={selectedGroup}
-                label="Proxy Group"
-                onChange={(e) => setSelectedGroup(e.target.value)}
-              >
-                {groups.map((group) => (
-                  <MenuItem key={group.name} value={group.name}>
-                    {group.name} ({group.type})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">
+                节点列表
+              </Typography>
+              {selectedGroup === 'PROXY' && groups.find(g => g.name === 'PROXY')?.now === 'auto' && (
+                <Chip 
+                  label="自动模式：选择延迟最低的节点" 
+                  color="success" 
+                  size="small" 
+                  icon={<Speed />}
+                />
+              )}
+            </Box>
 
             {/* Node List for Selected Group */}
             {selectedGroup && (() => {
@@ -223,18 +293,19 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
                   <Table>
                     <TableHead>
                       <TableRow>
-                        <TableCell>Node Name</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell>Delay</TableCell>
-                        <TableCell>Action</TableCell>
+                        <TableCell>节点名称</TableCell>
+                        <TableCell>类型</TableCell>
+                        <TableCell>延迟</TableCell>
+                        <TableCell>状态</TableCell>
+                        <TableCell>操作</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {group.all.map((nodeName) => {
-                        const node = proxies[nodeName] as ProxyNode;
+                        const node = proxies[nodeName] as any;
                         const isActive = group.now === nodeName;
-                        const history = group.history?.find(h => h.name === nodeName);
+                        // 从节点自身的history字段获取最新延迟
+                        const nodeDelay = node?.history?.[0]?.delay;
                         
                         return (
                           <TableRow 
@@ -256,17 +327,17 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
                             </TableCell>
                             <TableCell>
                               <Chip
-                                icon={node?.alive !== false ? <CheckCircle /> : <Error />}
-                                label={node?.alive !== false ? 'Online' : 'Offline'}
+                                label={formatDelay(nodeDelay)}
                                 size="small"
-                                color={node?.alive !== false ? 'success' : 'error'}
+                                color={getDelayColor(nodeDelay)}
                               />
                             </TableCell>
                             <TableCell>
                               <Chip
-                                label={formatDelay(history?.delay || node?.delay)}
+                                icon={node?.alive === true ? <CheckCircle /> : <Error />}
+                                label={node?.alive === true ? '在线' : (nodeDelay ? '未知' : '离线')}
                                 size="small"
-                                color={getDelayColor(history?.delay || node?.delay)}
+                                color={node?.alive === true ? 'success' : (nodeDelay ? 'warning' : 'error')}
                               />
                             </TableCell>
                             <TableCell>
@@ -276,7 +347,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
                                 onClick={() => handleSwitchProxy(selectedGroup, nodeName)}
                                 disabled={loading || isActive}
                               >
-                                {isActive ? 'Current' : 'Switch'}
+                                {isActive ? '当前' : '切换'}
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -342,10 +413,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
           <CardContent sx={{ textAlign: 'center', py: 8 }}>
             <Speed sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              No Proxy Groups Available
+              暂无代理组
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Configure proxy subscriptions first to manage proxy nodes
+              请先配置代理订阅以管理代理节点
             </Typography>
           </CardContent>
         </Card>

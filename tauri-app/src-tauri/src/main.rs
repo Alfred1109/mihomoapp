@@ -4,9 +4,11 @@
 mod mihomo;
 mod config;
 mod subscription;
+mod backup;
+mod validator;
 
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{Manager, State, SystemTray, SystemTrayEvent, SystemTrayMenu, CustomMenuItem, SystemTrayMenuItem};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +227,65 @@ async fn enable_tun_mode(enable: bool) -> Result<String, String> {
     config::set_tun_mode(enable).await
         .map_err(|e| format!("Failed to set TUN mode: {}", e))
         .map(|_| if enable { "TUN mode enabled" } else { "TUN mode disabled" }.to_string())
+}
+
+#[tauri::command]
+async fn test_group_delay(group_name: String) -> Result<String, String> {
+    mihomo::test_group_delay(&group_name).await
+        .map_err(|e| format!("Failed to test group delay: {}", e))
+        .map(|_| "Delay test completed".to_string())
+}
+
+#[tauri::command]
+async fn get_current_ip() -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+    
+    // 尝试多个IP查询服务，优先使用返回完整信息的服务
+    let services = vec![
+        "http://ip-api.com/json/",  // 免费，返回完整地理位置信息
+        "https://ipapi.co/json/",
+        "https://api.ip.sb/geoip",
+    ];
+    
+    for service in services {
+        println!("尝试从 {} 获取IP信息", service);
+        if let Ok(response) = client.get(service).send().await {
+            if let Ok(data) = response.json::<serde_json::Value>().await {
+                println!("成功获取IP信息: {:?}", data);
+                return Ok(data);
+            }
+        }
+    }
+    
+    Err("Failed to get IP information from all services".to_string())
+}
+
+#[tauri::command]
+async fn test_all_proxies(test_url: Option<String>, timeout: Option<u32>) -> Result<serde_json::Value, String> {
+    mihomo::test_all_proxies_delay(test_url, timeout).await
+        .map_err(|e| format!("Failed to test all proxies: {}", e))
+}
+
+#[tauri::command]
+async fn validate_config(config: serde_json::Value) -> Result<validator::ValidationResult, String> {
+    validator::validate_config(&config).await
+        .map_err(|e| format!("Failed to validate config: {}", e))
+}
+
+#[tauri::command]
+async fn list_config_backups() -> Result<Vec<String>, String> {
+    backup::list_backups().await
+        .map_err(|e| format!("Failed to list backups: {}", e))
+}
+
+#[tauri::command]
+async fn restore_config_backup(backup_filename: String) -> Result<String, String> {
+    backup::restore_config(&backup_filename).await
+        .map_err(|e| format!("Failed to restore backup: {}", e))
+        .map(|_| "配置已从备份恢复，请重启服务以应用更改".to_string())
 }
 
 #[tauri::command]
@@ -537,8 +598,76 @@ async fn get_mihomo_service_status() -> Result<String, String> {
 }
 
 fn main() {
+    // 创建系统托盘菜单
+    let show = CustomMenuItem::new("show".to_string(), "显示窗口");
+    let hide = CustomMenuItem::new("hide".to_string(), "隐藏窗口");
+    let start_service = CustomMenuItem::new("start".to_string(), "启动服务");
+    let stop_service = CustomMenuItem::new("stop".to_string(), "停止服务");
+    let quit = CustomMenuItem::new("quit".to_string(), "退出");
+    
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(show)
+        .add_item(hide)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(start_service)
+        .add_item(stop_service)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(quit);
+    
+    let system_tray = SystemTray::new().with_menu(tray_menu);
+
     tauri::Builder::default()
         .manage(AppStateType::new(AppState::default()))
+        .system_tray(system_tray)
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::LeftClick {
+                position: _,
+                size: _,
+                ..
+            } => {
+                let window = app.get_window("main").unwrap();
+                window.show().unwrap();
+                window.set_focus().unwrap();
+            }
+            SystemTrayEvent::MenuItemClick { id, .. } => {
+                match id.as_str() {
+                    "show" => {
+                        let window = app.get_window("main").unwrap();
+                        window.show().unwrap();
+                        window.set_focus().unwrap();
+                    }
+                    "hide" => {
+                        let window = app.get_window("main").unwrap();
+                        window.hide().unwrap();
+                    }
+                    "start" => {
+                        // 启动服务
+                        tauri::async_runtime::spawn(async move {
+                            let _ = mihomo::start_mihomo().await;
+                        });
+                    }
+                    "stop" => {
+                        // 停止服务
+                        tauri::async_runtime::spawn(async move {
+                            let _ = mihomo::stop_mihomo().await;
+                        });
+                    }
+                    "quit" => {
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        })
+        .on_window_event(|event| match event.event() {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                // 关闭窗口时最小化到托盘而不是退出
+                event.window().hide().unwrap();
+                api.prevent_close();
+            }
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
             get_mihomo_status,
             start_mihomo_service,
@@ -553,6 +682,12 @@ fn main() {
             delete_subscription,
             generate_config_from_subscriptions,
             enable_tun_mode,
+            test_group_delay,
+            test_all_proxies,
+            validate_config,
+            list_config_backups,
+            restore_config_backup,
+            get_current_ip,
             check_mihomo_binary,
             check_admin_privileges,
             restart_as_admin,

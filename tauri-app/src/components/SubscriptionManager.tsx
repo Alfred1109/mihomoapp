@@ -72,7 +72,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
       const data = await invoke<Subscription[]>('get_subscriptions');
       setSubscriptions(data);
     } catch (error) {
-      showNotification(`Failed to load subscriptions: ${error}`, 'error');
+      showNotification(`加载订阅失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -80,7 +80,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
 
   const handleAddSubscription = async () => {
     if (!newSubscription.name || !newSubscription.url) {
-      showNotification('Please fill in all required fields', 'error');
+      showNotification('请填写所有必填字段', 'error');
       return;
     }
 
@@ -92,42 +92,42 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
         useProxy: newSubscription.useProxy,
       });
       
-      showNotification('Subscription added successfully', 'success');
+      showNotification('订阅添加成功', 'success');
       setDialogOpen(false);
       setNewSubscription({ name: '', url: '', userAgent: 'clash', useProxy: false });
       loadSubscriptions();
     } catch (error) {
-      showNotification(`Failed to add subscription: ${error}`, 'error');
+      showNotification(`添加订阅失败: ${error}`, 'error');
     }
   };
 
   const handleUpdateSubscription = async (id: string) => {
     try {
       await invoke('update_subscription', { id });
-      showNotification('Subscription updated successfully', 'success');
+      showNotification('订阅更新成功！配置文件已生成。如果服务正在运行，请重启以应用更改。', 'success');
       loadSubscriptions();
     } catch (error) {
-      showNotification(`Failed to update subscription: ${error}`, 'error');
+      showNotification(`更新订阅失败: ${error}`, 'error');
     }
   };
 
   const handleDeleteSubscription = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to delete subscription "${name}"?`)) {
+    if (!confirm(`确定要删除订阅 "${name}" 吗？`)) {
       return;
     }
 
     try {
       await invoke('delete_subscription', { id });
-      showNotification('Subscription deleted successfully', 'success');
+      showNotification('订阅删除成功', 'success');
       loadSubscriptions();
     } catch (error) {
-      showNotification(`Failed to delete subscription: ${error}`, 'error');
+      showNotification(`删除订阅失败: ${error}`, 'error');
     }
   };
 
   const handleGenerateConfig = async () => {
     if (selectedSubscriptions.length === 0) {
-      showNotification('Please select at least one subscription', 'error');
+      showNotification('请至少选择一个订阅', 'error');
       return;
     }
 
@@ -135,9 +135,9 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
       await invoke('generate_config_from_subscriptions', {
         subscriptionIds: selectedSubscriptions,
       });
-      showNotification('Configuration generated successfully', 'success');
+      showNotification('配置生成成功', 'success');
     } catch (error) {
-      showNotification(`Failed to generate configuration: ${error}`, 'error');
+      showNotification(`生成配置失败: ${error}`, 'error');
     }
   };
 

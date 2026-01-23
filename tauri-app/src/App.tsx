@@ -22,6 +22,7 @@ import Dashboard from './components/Dashboard';
 import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
 import ConfigManager from './components/ConfigManager';
+import BackupManager from './components/BackupManager';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -232,6 +233,7 @@ function App() {
             <Tab label={t('app.subscription')} />
             <Tab label={t('app.proxy')} />
             <Tab label={t('app.config')} />
+            <Tab label="备份管理" />
           </Tabs>
         </Box>
 
@@ -259,6 +261,10 @@ function App() {
             isRunning={mihomoStatus}
             showNotification={showNotification}
           />
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={4}>
+          <BackupManager showNotification={showNotification} />
         </TabPanel>
       </Container>
 

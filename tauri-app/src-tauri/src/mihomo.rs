@@ -14,27 +14,6 @@ pub struct ProxyGroup {
     pub history: Vec<ProxyHistory>,
 }
 
-pub async fn reload_config() -> Result<()> {
-    let config_dir = dirs::config_dir()
-        .context("Failed to get config directory")?
-        .join("mihomo");
-    let config_path = config_dir.join("config.yaml");
-
-    let client = reqwest::Client::new();
-    let response = client
-        .put("http://127.0.0.1:9090/configs")
-        .json(&serde_json::json!({ "path": config_path }))
-        .send()
-        .await
-        .context("Failed to reload config")?;
-
-    if !response.status().is_success() {
-        return Err(anyhow::anyhow!("Failed to reload config: {}", response.status()));
-    }
-
-    Ok(())
-}
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyHistory {
@@ -127,6 +106,8 @@ pub fn create_default_config() -> serde_json::Value {
         "mode": "rule",
         "log-level": "info",
         "external-controller": "127.0.0.1:9090",
+        "unified-delay": true,
+        "tcp-concurrent": true,
         "dns": {
             "enable": true,
             "listen": "0.0.0.0:53",
@@ -135,6 +116,14 @@ pub fn create_default_config() -> serde_json::Value {
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
             ]
+        },
+        "tun": {
+            "enable": false,
+            "stack": "system",
+            "auto-route": true,
+            "auto-detect-interface": true,
+            "dns-hijack": ["any:53"],
+            "mtu": 1500
         },
         "proxies": [],
         "proxy-groups": [],
@@ -261,6 +250,134 @@ pub async fn test_proxy_delay(proxy_name: &str, test_url: &str, timeout: u32) ->
         .as_u64()
         .map(|d| d as u32)
         .ok_or_else(|| anyhow::anyhow!("Invalid delay response"))
+}
+
+pub async fn test_group_delay(group_name: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!("http://127.0.0.1:9090/group/{}/delay", group_name))
+        .query(&[("timeout", "5000"), ("url", "http://www.gstatic.com/generate_204")])
+        .send()
+        .await
+        .context("Failed to test group delay")?;
+    
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!("Failed to test group delay: {}", response.status()));
+    }
+    
+    Ok(())
+}
+
+/// 批量测试所有节点延迟（优化版）
+pub async fn test_all_proxies_delay(test_url: Option<String>, timeout: Option<u32>) -> Result<serde_json::Value> {
+    // 使用更快的测速URL - CP.cloudflare.com是专门用于连接测试的
+    let test_url = test_url.unwrap_or_else(|| "http://cp.cloudflare.com".to_string());
+    let timeout = timeout.unwrap_or(5000);
+    
+    println!("🚀 开始批量测速，测试URL: {}, 超时: {}ms", test_url, timeout);
+    
+    // 创建优化的HTTP客户端（连接池复用）
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(50)
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_millis(timeout as u64))
+        .tcp_keepalive(std::time::Duration::from_secs(10))
+        .build()
+        .context("Failed to create HTTP client")?;
+    
+    // 获取所有代理节点
+    let proxies = get_proxies().await?;
+    let proxy_map = proxies["proxies"].as_object()
+        .ok_or_else(|| anyhow::anyhow!("Invalid proxies response"))?;
+    
+    // 过滤出实际的代理节点
+    let exclude_types = vec!["Selector", "URLTest", "Fallback", "LoadBalance", "Relay"];
+    let exclude_names = vec!["DIRECT", "REJECT", "COMPATIBLE", "PASS", "REJECT-DROP", "GLOBAL"];
+    
+    let mut proxy_names = Vec::new();
+    for (name, proxy) in proxy_map {
+        if let Some(proxy_type) = proxy["type"].as_str() {
+            if !exclude_types.contains(&proxy_type) && !exclude_names.contains(&name.as_str()) {
+                proxy_names.push(name.clone());
+            }
+        }
+    }
+    
+    println!("📊 找到 {} 个节点，开始并发测速...", proxy_names.len());
+    
+    // 使用信号量限制并发数
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(20));
+    let client = std::sync::Arc::new(client);
+    
+    let mut test_tasks = Vec::new();
+    
+    for name in proxy_names.iter() {
+        let name_clone = name.clone();
+        let url_clone = test_url.clone();
+        let client_clone = client.clone();
+        let semaphore_clone = semaphore.clone();
+        
+        let task = tokio::spawn(async move {
+            let _permit = semaphore_clone.acquire().await.ok();
+            
+            match test_proxy_delay_optimized(&client_clone, &name_clone, &url_clone, timeout).await {
+                Ok(delay) => {
+                    println!("  ✓ {} - {}ms", name_clone, delay);
+                    (name_clone, Some(delay))
+                }
+                Err(_) => {
+                    println!("  ✗ {} - 超时", name_clone);
+                    (name_clone, None)
+                }
+            }
+        });
+        
+        test_tasks.push(task);
+    }
+    
+    // 等待所有测试完成
+    let mut results = std::collections::HashMap::new();
+    for task in test_tasks {
+        if let Ok((name, delay)) = task.await {
+            results.insert(name, delay);
+        }
+    }
+    
+    let success_count = results.iter().filter(|(_, d)| d.is_some()).count();
+    println!("✅ 批量测速完成！成功: {}/{}", success_count, proxy_names.len());
+    
+    Ok(serde_json::json!({
+        "total": proxy_names.len(),
+        "tested": results.len(),
+        "success": success_count,
+        "results": results
+    }))
+}
+
+/// 优化的延迟测试（使用共享客户端）
+async fn test_proxy_delay_optimized(
+    client: &reqwest::Client,
+    proxy_name: &str,
+    test_url: &str,
+    timeout: u32,
+) -> Result<u32> {
+    let response = client
+        .get(&format!("http://127.0.0.1:9090/proxies/{}/delay", proxy_name))
+        .query(&[("timeout", timeout.to_string()), ("url", test_url.to_string())])
+        .send()
+        .await
+        .context("Failed to test proxy delay")?;
+    
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .context("Failed to parse delay test result")?;
+    
+    if let Some(delay) = result["delay"].as_u64() {
+        Ok(delay as u32)
+    } else {
+        Err(anyhow::anyhow!("No delay value in response"))
+    }
 }
 
 fn get_config_path() -> Result<String> {

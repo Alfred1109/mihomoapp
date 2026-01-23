@@ -73,7 +73,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
       setConfigText(JSON.stringify(configData, null, 2));
       setHasChanges(false);
     } catch (error) {
-      showNotification(`Failed to load configuration: ${error}`, 'error');
+      showNotification(`加载配置失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -84,16 +84,16 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
     try {
       await invoke('save_mihomo_config', { config });
       setHasChanges(false);
-      showNotification('Configuration saved successfully', 'success');
+      showNotification('配置保存成功', 'success');
     } catch (error) {
-      showNotification(`Failed to save configuration: ${error}`, 'error');
+      showNotification(`保存配置失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const resetConfig = async () => {
-    if (!confirm('Are you sure you want to reset the configuration? This will overwrite all current settings.')) {
+    if (!confirm('确定要重置配置吗？这将覆盖所有当前设置。')) {
       return;
     }
 
@@ -101,9 +101,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
     try {
       // This would need to be implemented in the backend
       await loadConfig();
-      showNotification('Configuration reset successfully', 'success');
+      showNotification('配置重置成功', 'success');
     } catch (error) {
-      showNotification(`Failed to reset configuration: ${error}`, 'error');
+      showNotification(`重置配置失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -137,9 +137,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
       const parsedConfig = JSON.parse(configText);
       setConfig(parsedConfig);
       setHasChanges(true);
-      showNotification('Configuration loaded from text editor', 'success');
+      showNotification('已从文本编辑器加载配置', 'success');
     } catch (error) {
-      showNotification('Invalid JSON format in text editor', 'error');
+      showNotification('文本编辑器中的JSON格式无效', 'error');
     }
   };
 
@@ -159,7 +159,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
         <CardContent sx={{ textAlign: 'center', py: 8 }}>
           <Settings sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="h6" gutterBottom>
-            Loading Configuration...
+            加载配置中...
           </Typography>
         </CardContent>
       </Card>
@@ -170,16 +170,16 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
     <Box>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">Configuration Manager</Typography>
+        <Typography variant="h5">配置管理</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {hasChanges && <Chip label="Unsaved Changes" color="warning" size="small" />}
+          {hasChanges && <Chip label="未保存的更改" color="warning" size="small" />}
           <Button
             variant="outlined"
             startIcon={<RestoreFromTrash />}
             onClick={resetConfig}
             disabled={loading}
           >
-            Reset
+            重置
           </Button>
           <Button
             variant="outlined"
@@ -187,7 +187,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
             onClick={loadConfig}
             disabled={loading}
           >
-            Reload
+            重新加载
           </Button>
           <Button
             variant="contained"
@@ -195,7 +195,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
             onClick={saveConfig}
             disabled={loading || !hasChanges}
           >
-            Save
+            保存
           </Button>
         </Box>
       </Box>
@@ -203,10 +203,10 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
       <Card>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={tabValue} onChange={handleTabChange}>
-            <Tab icon={<NetworkCheck />} label="General" />
-            <Tab icon={<Security />} label="Proxy" />
+            <Tab icon={<NetworkCheck />} label="常规" />
+            <Tab icon={<Security />} label="代理" />
             <Tab icon={<Dns />} label="DNS" />
-            <Tab icon={<Code />} label="Advanced" />
+            <Tab icon={<Code />} label="高级" />
           </Tabs>
         </Box>
 
@@ -215,13 +215,13 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>
-                Basic Settings
+                基本设置
               </Typography>
               
               <Grid container spacing={2}>
                 <Grid item xs={6}>
                   <TextField
-                    label="HTTP Port"
+                    label="HTTP 端口"
                     type="number"
                     value={config.port || 7890}
                     onChange={(e) => updateConfig('port', parseInt(e.target.value))}
@@ -230,7 +230,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                 </Grid>
                 <Grid item xs={6}>
                   <TextField
-                    label="SOCKS Port"
+                    label="SOCKS 端口"
                     type="number"
                     value={config['socks-port'] || 7891}
                     onChange={(e) => updateConfig('socks-port', parseInt(e.target.value))}
@@ -239,7 +239,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                 </Grid>
                 <Grid item xs={6}>
                   <TextField
-                    label="Mixed Port"
+                    label="混合端口"
                     type="number"
                     value={config['mixed-port'] || 7890}
                     onChange={(e) => updateConfig('mixed-port', parseInt(e.target.value))}
@@ -248,7 +248,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                 </Grid>
                 <Grid item xs={6}>
                   <TextField
-                    label="External Controller"
+                    label="外部控制器"
                     value={config['external-controller'] || '127.0.0.1:9090'}
                     onChange={(e) => updateConfig('external-controller', e.target.value)}
                     fullWidth
@@ -264,10 +264,10 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                       onChange={(e) => updateConfig('allow-lan', e.target.checked)}
                     />
                   }
-                  label="Allow LAN Access"
+                  label="允许局域网访问"
                 />
                 <Typography variant="body2" color="text.secondary">
-                  Allow other devices on your network to use this proxy
+                  允许网络中的其他设备使用此代理
                 </Typography>
               </Box>
 
@@ -279,17 +279,17 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                       onChange={(e) => updateConfig('ipv6', e.target.checked)}
                     />
                   }
-                  label="IPv6 Support"
+                  label="启用 IPv6"
                 />
                 <Typography variant="body2" color="text.secondary">
-                  Enable IPv6 traffic handling
+                  启用 IPv6 流量处理
                 </Typography>
               </Box>
             </Grid>
 
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>
-                TUN Mode
+                TUN 模式
               </Typography>
               
               <FormControlLabel
@@ -299,20 +299,20 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                     onChange={(e) => updateConfig('tun.enable', e.target.checked)}
                   />
                 }
-                label="Enable TUN Mode"
+                label="启用 TUN 模式"
               />
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                System-wide transparent proxy (requires administrator privileges)
+                系统级透明代理（需要管理员权限）
               </Typography>
 
               {config.tun?.enable && (
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <FormControl fullWidth>
-                      <InputLabel>TUN Stack</InputLabel>
+                      <InputLabel>TUN 协议栈</InputLabel>
                       <Select
                         value={config.tun?.stack || 'system'}
-                        label="TUN Stack"
+                        label="TUN 协议栈"
                         onChange={(e) => updateConfig('tun.stack', e.target.value)}
                       >
                         <MenuItem value="system">System</MenuItem>
@@ -323,7 +323,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                   </Grid>
                   <Grid item xs={12}>
                     <TextField
-                      label="Device Name"
+                      label="设备名称"
                       value={config.tun?.['device-name'] || ''}
                       onChange={(e) => updateConfig('tun.device-name', e.target.value)}
                       placeholder="auto"
@@ -341,37 +341,37 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>
-                Proxy Settings
+                代理设置
               </Typography>
               
               <Grid container spacing={2}>
                 <Grid item xs={12}>
                   <FormControl fullWidth>
-                    <InputLabel>Proxy Mode</InputLabel>
+                    <InputLabel>代理模式</InputLabel>
                     <Select
                       value={config.mode || 'rule'}
-                      label="Proxy Mode"
+                      label="代理模式"
                       onChange={(e) => updateConfig('mode', e.target.value)}
                     >
-                      <MenuItem value="rule">Rule-based</MenuItem>
-                      <MenuItem value="global">Global</MenuItem>
-                      <MenuItem value="direct">Direct</MenuItem>
+                      <MenuItem value="rule">规则模式</MenuItem>
+                      <MenuItem value="global">全局模式</MenuItem>
+                      <MenuItem value="direct">直连模式</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12}>
                   <FormControl fullWidth>
-                    <InputLabel>Log Level</InputLabel>
+                    <InputLabel>日志级别</InputLabel>
                     <Select
                       value={config['log-level'] || 'info'}
-                      label="Log Level"
+                      label="日志级别"
                       onChange={(e) => updateConfig('log-level', e.target.value)}
                     >
-                      <MenuItem value="silent">Silent</MenuItem>
-                      <MenuItem value="error">Error</MenuItem>
-                      <MenuItem value="warning">Warning</MenuItem>
-                      <MenuItem value="info">Info</MenuItem>
-                      <MenuItem value="debug">Debug</MenuItem>
+                      <MenuItem value="silent">静默</MenuItem>
+                      <MenuItem value="error">错误</MenuItem>
+                      <MenuItem value="warning">警告</MenuItem>
+                      <MenuItem value="info">信息</MenuItem>
+                      <MenuItem value="debug">调试</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
@@ -385,7 +385,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>
-                DNS Settings
+                DNS 设置
               </Typography>
               
               <FormControlLabel
@@ -395,17 +395,17 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                     onChange={(e) => updateConfig('dns.enable', e.target.checked)}
                   />
                 }
-                label="Enable DNS"
+                label="启用 DNS"
               />
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Use mihomo's built-in DNS server
+                使用 mihomo 的内置 DNS 服务器
               </Typography>
 
               {config.dns?.enable !== false && (
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
                     <TextField
-                      label="DNS Listen Address"
+                      label="DNS 监听地址"
                       value={config.dns?.listen || '0.0.0.0:53'}
                       onChange={(e) => updateConfig('dns.listen', e.target.value)}
                       fullWidth
@@ -413,10 +413,10 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
                   </Grid>
                   <Grid item xs={12}>
                     <FormControl fullWidth>
-                      <InputLabel>Enhanced Mode</InputLabel>
+                      <InputLabel>增强模式</InputLabel>
                       <Select
                         value={config.dns?.enhanced_mode || 'fake-ip'}
-                        label="Enhanced Mode"
+                        label="增强模式"
                         onChange={(e) => updateConfig('dns.enhanced_mode', e.target.value)}
                       >
                         <MenuItem value="fake-ip">Fake IP</MenuItem>
@@ -433,10 +433,10 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
         {/* Advanced Configuration */}
         <TabPanel value={tabValue} index={3}>
           <Typography variant="h6" gutterBottom>
-            Raw Configuration (JSON)
+            原始配置 (JSON)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Edit the raw configuration directly. Be careful with the syntax.
+            直接编辑原始配置。请注意语法正确性。
           </Typography>
           
           <Paper sx={{ p: 2, mb: 2 }}>
@@ -456,13 +456,13 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
               variant="outlined"
               onClick={loadConfig}
             >
-              Reload from Server
+              从服务器重新加载
             </Button>
             <Button
               variant="contained"
               onClick={applyTextConfig}
             >
-              Apply Changes
+              应用更改
             </Button>
           </Box>
         </TabPanel>
@@ -470,7 +470,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
 
       {isRunning && hasChanges && (
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Configuration changes will take effect after restarting the mihomo service.
+          配置更改将在重启 mihomo 服务后生效。
         </Alert>
       )}
     </Box>

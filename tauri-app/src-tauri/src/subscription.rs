@@ -1,8 +1,8 @@
 use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
+use std::fs;
 use uuid::Uuid;
 
 fn build_subscription_request(
@@ -126,14 +126,8 @@ pub async fn update_subscription(id: &str) -> Result<()> {
                         return Err(err);
                     }
                     
-                    // Reload mihomo config
-                    if let Err(err) = crate::mihomo::reload_config().await {
-                        storage = load_subscriptions().await.unwrap_or_default();
-                        if let Some(sub) = storage.subscriptions.get_mut(id) {
-                            sub.last_error = Some(format!("配置重载失败: {}", err));
-                        }
-                        save_subscriptions(&storage).await?;
-                    }
+                    println!("✓ 订阅更新成功，配置文件已生成");
+                    println!("提示: 配置已更新。如果Mihomo服务正在运行，请重启服务以应用更改。");
                 }
             }
             Err(e) => {
@@ -189,8 +183,21 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
         return Err(anyhow::anyhow!("没有找到任何代理节点"));
     }
     
+    // Backup current config before generating new one
+    if let Err(e) = crate::backup::backup_config().await {
+        println!("⚠ 配置备份失败: {}", e);
+        // 不阻止配置生成，继续执行
+    } else {
+        println!("✓ 配置已备份");
+    }
+    
     // Generate config with proxies
     let mut config = crate::config::load_config().await?;
+    
+    // 启用nyanpasu的关键优化配置
+    config["unified-delay"] = serde_json::json!(true);
+    config["tcp-concurrent"] = serde_json::json!(true);
+    
     config["proxies"] = serde_json::json!(all_proxies);
     
     // Create or update proxy groups
@@ -209,13 +216,39 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
             "name": "auto",
             "type": "url-test",
             "proxies": proxy_names.clone(),
-            "url": "http://www.gstatic.com/generate_204",
+            "url": "http://1.1.1.1",
             "interval": 300,
             "tolerance": 50
         })
     ];
     
     config["proxy-groups"] = serde_json::json!(proxy_groups);
+    
+    // 验证配置
+    match crate::validator::validate_config(&config).await {
+        Ok(result) => {
+            if !result.valid {
+                println!("⚠ 配置验证失败:");
+                for error in &result.errors {
+                    println!("  ✗ {}", error);
+                }
+                return Err(anyhow::anyhow!("配置验证失败: {}", result.errors.join(", ")));
+            }
+            
+            if !result.warnings.is_empty() {
+                println!("⚠ 配置警告:");
+                for warning in &result.warnings {
+                    println!("  ! {}", warning);
+                }
+            }
+            
+            println!("✓ 配置验证通过");
+        }
+        Err(e) => {
+            println!("⚠ 配置验证出错: {}", e);
+            // 验证出错不阻止保存，继续执行
+        }
+    }
     
     crate::config::save_config(config).await?;
     
@@ -244,14 +277,26 @@ async fn fetch_subscription_content(subscription: &Subscription) -> Result<u32> 
 }
 
 async fn fetch_and_parse_subscription(subscription: &Subscription) -> Result<Vec<serde_json::Value>> {
+    // 使用真实的浏览器User-Agent避免418错误
+    let default_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     let mut client_builder = reqwest::Client::builder()
-        .user_agent(subscription.user_agent.as_deref().unwrap_or("clash"))
+        .user_agent(subscription.user_agent.as_deref().unwrap_or(default_ua))
         .timeout(std::time::Duration::from_secs(30))
         .danger_accept_invalid_certs(true);
     
-    // 如果不使用代理，则禁用系统代理
+    // 如果不使用代理，则完全禁用所有代理
     if !subscription.use_proxy {
+        println!("订阅 '{}' 配置为直连模式，完全绕过系统代理", subscription.name);
+        // 禁用系统代理和环境变量代理
         client_builder = client_builder.no_proxy();
+        
+        // 绑定到本地网卡，确保直连
+        // 使用 0.0.0.0 绑定到所有本地接口，确保不通过代理
+        if let Ok(addr) = "0.0.0.0".parse::<std::net::IpAddr>() {
+            client_builder = client_builder.local_address(addr);
+        }
+    } else {
+        println!("订阅 '{}' 配置为使用代理模式", subscription.name);
     }
     
     let client = client_builder.build()?;
