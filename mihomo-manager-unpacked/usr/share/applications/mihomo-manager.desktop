@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mihomo Manager
+Comment=Mihomo (Clash Meta) 代理管理桌面应用程序
+Exec=mihomo-manager
+Icon=mihomo-manager
+Terminal=false
+Categories=Network;
+Keywords=proxy;mihomo;clash;vpn;
+StartupWMClass=mihomo-manager
+MimeType=
