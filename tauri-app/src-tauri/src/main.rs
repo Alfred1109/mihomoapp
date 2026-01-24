@@ -661,9 +661,9 @@ async fn start_mihomo_service_cmd() -> Result<String, String> {
             return Err("Mihomo 服务未安装，请先安装服务".to_string());
         }
         
-        // 启动服务
-        let output = Command::new("systemctl")
-            .args(["start", "mihomo.service"])
+        // 启动服务（使用 pkexec 获取 root 权限）
+        let output = Command::new("pkexec")
+            .args(["systemctl", "start", "mihomo.service"])
             .output()
             .map_err(|e| format!("启动服务失败: {}", e))?;
         
@@ -709,9 +709,9 @@ async fn stop_mihomo_service_cmd() -> Result<String, String> {
     {
         use std::process::Command;
         
-        // 停止服务
-        let output = Command::new("systemctl")
-            .args(["stop", "mihomo.service"])
+        // 停止服务（使用 pkexec 获取 root 权限）
+        let output = Command::new("pkexec")
+            .args(["systemctl", "stop", "mihomo.service"])
             .output()
             .map_err(|e| format!("停止服务失败: {}", e))?;
         
@@ -758,9 +758,9 @@ async fn restart_mihomo_service_cmd() -> Result<String, String> {
     {
         use std::process::Command;
         
-        // 重启服务
-        let output = Command::new("systemctl")
-            .args(["restart", "mihomo.service"])
+        // 重启服务（使用 pkexec 获取 root 权限）
+        let output = Command::new("pkexec")
+            .args(["systemctl", "restart", "mihomo.service"])
             .output()
             .map_err(|e| format!("重启服务失败: {}", e))?;
         
