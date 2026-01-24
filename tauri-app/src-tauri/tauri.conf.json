@@ -43,13 +43,10 @@
       "targets": ["deb", "msi", "nsis"],
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
+          "libwebkit2gtk-4.1-0",
           "libayatana-appindicator3-1",
           "libgtk-3-0"
         ],
-        "files": {
-          "resources/mihomo": "/usr/local/bin/mihomo"
-        },
         "desktopTemplate": "mihomoapp.desktop"
       },
       "windows": {
