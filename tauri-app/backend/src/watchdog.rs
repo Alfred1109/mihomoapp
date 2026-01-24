@@ -167,10 +167,4 @@ impl ProcessWatchdog {
             }
         });
     }
-    
-    pub async fn stop_monitoring(&self) {
-        let mut monitoring = self.monitoring.write().await;
-        *monitoring = false;
-        info!("Watchdog monitoring will stop");
-    }
 }

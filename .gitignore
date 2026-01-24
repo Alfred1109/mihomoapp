@@ -7,7 +7,7 @@ yarn-error.log*
 # Production
 build/
 dist/
-tauri-app/src-tauri/target/
+tauri-app/backend/target/
 
 # Environment variables
 .env
@@ -55,9 +55,13 @@ server/config/
 # Build artifacts
 *.deb
 *.msi
-*.exe
 *.dmg
 *.AppImage
+
+# Exclude build executables but allow resources
+*.exe
+!tauri-app/backend/resources/*.exe
+!tauri-app/backend/resources/mihomo
 
 # Temporary scripts
 test_*.sh

@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use yaml_rust::{Yaml, YamlEmitter};
+use yaml_rust::Yaml;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,19 +192,6 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
     save_config(default_config).await
 }
 
-async fn create_backup(config_path: &PathBuf) -> Result<()> {
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_path = config_path
-        .parent()
-        .unwrap()
-        .join(format!("config-backup-{}.yaml", timestamp));
-    
-    fs::copy(config_path, backup_path)
-        .context("Failed to create config backup")?;
-    
-    Ok(())
-}
-
 pub fn get_config_path() -> Result<PathBuf> {
     let config_dir = get_mihomo_config_dir()?;
     Ok(config_dir.join("config.yaml"))
@@ -269,45 +256,5 @@ pub fn yaml_to_json(yaml: &Yaml) -> Result<serde_json::Value> {
         Yaml::Alias(_) => Err(anyhow::anyhow!("YAML aliases not supported")),
         Yaml::Null => Ok(serde_json::Value::Null),
         Yaml::BadValue => Err(anyhow::anyhow!("Bad YAML value")),
-    }
-}
-
-fn json_to_yaml(json: &serde_json::Value) -> Result<String> {
-    let yaml = json_to_yaml_value(json)?;
-    let mut out_str = String::new();
-    let mut emitter = YamlEmitter::new(&mut out_str);
-    emitter.dump(&yaml)
-        .context("Failed to emit YAML")?;
-    Ok(out_str)
-}
-
-fn json_to_yaml_value(json: &serde_json::Value) -> Result<Yaml> {
-    match json {
-        serde_json::Value::Null => Ok(Yaml::Null),
-        serde_json::Value::Bool(b) => Ok(Yaml::Boolean(*b)),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Ok(Yaml::Integer(i))
-            } else if let Some(f) = n.as_f64() {
-                Ok(Yaml::Real(f.to_string()))
-            } else {
-                Err(anyhow::anyhow!("Invalid number format"))
-            }
-        }
-        serde_json::Value::String(s) => Ok(Yaml::String(s.clone())),
-        serde_json::Value::Array(arr) => {
-            let mut yaml_arr = Vec::new();
-            for item in arr {
-                yaml_arr.push(json_to_yaml_value(item)?);
-            }
-            Ok(Yaml::Array(yaml_arr))
-        }
-        serde_json::Value::Object(obj) => {
-            let mut yaml_hash = yaml_rust::yaml::Hash::new();
-            for (key, value) in obj {
-                yaml_hash.insert(Yaml::String(key.clone()), json_to_yaml_value(value)?);
-            }
-            Ok(Yaml::Hash(yaml_hash))
-        }
     }
 }

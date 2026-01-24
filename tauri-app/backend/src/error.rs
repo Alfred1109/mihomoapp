@@ -45,8 +45,6 @@ pub enum AppError {
     Other(String),
 }
 
-pub type AppResult<T> = Result<T, AppError>;
-
 impl From<AppError> for String {
     fn from(error: AppError) -> Self {
         error.to_string()
