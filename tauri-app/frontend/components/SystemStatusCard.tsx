@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -32,7 +32,7 @@ interface ProxyInfo {
   alive: boolean;
 }
 
-const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNotification }) => {
+const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunning, showNotification }) => {
   const [tunMode, setTunMode] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
@@ -208,6 +208,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ isRunning, showNoti
       </CardContent>
     </Card>
   );
-};
+});
+
+SystemStatusCard.displayName = 'SystemStatusCard';
 
 export default SystemStatusCard;

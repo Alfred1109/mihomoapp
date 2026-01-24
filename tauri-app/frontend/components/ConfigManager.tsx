@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -58,7 +58,7 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
-const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotification }) => {
+const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, showNotification }) => {
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -546,6 +546,8 @@ const ConfigManager: React.FC<ConfigManagerProps> = ({ isRunning, showNotificati
       )}
     </Box>
   );
-};
+});
+
+ConfigManager.displayName = 'ConfigManager';
 
 export default ConfigManager;

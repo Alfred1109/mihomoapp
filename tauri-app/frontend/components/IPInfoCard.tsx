@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -23,7 +23,7 @@ interface IPInfoCardProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-const IPInfoCard: React.FC<IPInfoCardProps> = ({ isRunning, showNotification }) => {
+const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotification }) => {
   const [ipInfo, setIpInfo] = useState<any>(null);
   const [ipLoading, setIpLoading] = useState(false);
 
@@ -171,6 +171,8 @@ const IPInfoCard: React.FC<IPInfoCardProps> = ({ isRunning, showNotification }) 
       </CardContent>
     </Card>
   );
-};
+});
+
+IPInfoCard.displayName = 'IPInfoCard';
 
 export default IPInfoCard;

@@ -10,7 +10,7 @@ interface DashboardProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ isRunning, onStatusChange, showNotification }) => {
+const Dashboard: React.FC<DashboardProps> = React.memo(({ isRunning, onStatusChange, showNotification }) => {
   return (
     <Box>
       <Grid container spacing={3}>
@@ -46,6 +46,8 @@ const Dashboard: React.FC<DashboardProps> = ({ isRunning, onStatusChange, showNo
       </Grid>
     </Box>
   );
-};
+});
+
+Dashboard.displayName = 'Dashboard';
 
 export default Dashboard;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -30,7 +30,7 @@ interface BackupManagerProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-const BackupManager: React.FC<BackupManagerProps> = ({ showNotification }) => {
+const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotification }) => {
   const [backups, setBackups] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
@@ -248,6 +248,8 @@ const BackupManager: React.FC<BackupManagerProps> = ({ showNotification }) => {
       </Dialog>
     </Box>
   );
-};
+});
+
+BackupManager.displayName = 'BackupManager';
 
 export default BackupManager;

@@ -23,6 +23,7 @@ import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
 import ConfigManager from './components/ConfigManager';
 import BackupManager from './components/BackupManager';
+import { useAppStore } from './store/appStore';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -49,9 +50,6 @@ function TabPanel(props: TabPanelProps) {
 function App() {
   const { t, i18n } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
-  const [mihomoStatus, setMihomoStatus] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminCheckDone, setAdminCheckDone] = useState(false);
   const [langMenuAnchor, setLangMenuAnchor] = useState<null | HTMLElement>(null);
   const [notification, setNotification] = useState<{
     open: boolean;
@@ -63,30 +61,29 @@ function App() {
     severity: 'info',
   });
 
+  // 使用 Zustand store
+  const { mihomoStatus, isAdmin, adminCheckDone, setIsAdmin, setAdminCheckDone, initEventListeners } = useAppStore();
+
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
   const checkMihomoStatus = async () => {
-    // Check if we're running in Tauri environment
+    // 初始状态检查（仅在启动时执行一次）
     if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
       try {
         const serviceStatus = await invoke<string>('get_mihomo_service_status');
         if (serviceStatus === 'running') {
-          setMihomoStatus(true);
           return;
         }
 
         // Fallback to direct process status
-        const status = await invoke<boolean>('get_mihomo_status');
-        setMihomoStatus(status);
+        await invoke<boolean>('get_mihomo_status');
       } catch (error) {
         console.error('Failed to get mihomo status:', error);
       }
     } else {
       console.log('Running in browser mode - Tauri API not available');
-      // Set mock status for browser development
-      setMihomoStatus(false);
     }
   };
 
@@ -143,12 +140,12 @@ function App() {
   };
 
   useEffect(() => {
+    // 初始化事件监听器
+    initEventListeners();
+    
+    // 初始状态检查
     checkMihomoStatus();
     checkAdminPrivileges();
-    
-    // Check status periodically
-    const interval = setInterval(checkMihomoStatus, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -206,7 +203,7 @@ function App() {
                 px: 2,
                 py: 0.5,
                 borderRadius: 1,
-                backgroundColor: mihomoStatus ? 'success.main' : 'error.main',
+                backgroundColor: mihomoStatus.running ? 'success.main' : 'error.main',
                 color: 'white',
               }}
             >
@@ -219,7 +216,7 @@ function App() {
                 }}
               />
               <Typography variant="body2">
-                {mihomoStatus ? t('dashboard.running') : t('dashboard.stopped')}
+                {mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}
               </Typography>
             </Box>
           </Box>
@@ -239,8 +236,8 @@ function App() {
 
         <TabPanel value={tabValue} index={0}>
           <Dashboard 
-            isRunning={mihomoStatus}
-            onStatusChange={setMihomoStatus}
+            isRunning={mihomoStatus.running}
+            onStatusChange={() => {}}
             showNotification={showNotification}
           />
         </TabPanel>
@@ -251,14 +248,14 @@ function App() {
 
         <TabPanel value={tabValue} index={2}>
           <ProxyManager 
-            isRunning={mihomoStatus}
+            isRunning={mihomoStatus.running}
             showNotification={showNotification}
           />
         </TabPanel>
 
         <TabPanel value={tabValue} index={3}>
           <ConfigManager 
-            isRunning={mihomoStatus}
+            isRunning={mihomoStatus.running}
             showNotification={showNotification}
           />
         </TabPanel>

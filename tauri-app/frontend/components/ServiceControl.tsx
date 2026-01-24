@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -7,12 +7,16 @@ import {
   Box,
   Chip,
   CircularProgress,
+  FormControlLabel,
+  Switch,
+  Divider,
 } from '@mui/material';
 import {
   PlayArrow,
   Stop,
   Refresh,
   Security,
+  AutorenewOutlined,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -22,14 +26,43 @@ interface ServiceControlProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-const ServiceControl: React.FC<ServiceControlProps> = ({ isRunning, onStatusChange, showNotification }) => {
+const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, onStatusChange, showNotification }) => {
   const [loading, setLoading] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<string>('not_installed');
   const [serviceLoading, setServiceLoading] = useState(false);
+  const [autoRestart, setAutoRestart] = useState(true);
 
   React.useEffect(() => {
     checkServiceStatus();
+    loadAutoRestartSetting();
   }, []);
+
+  const loadAutoRestartSetting = async () => {
+    if (typeof window === 'undefined' || !(window as any).__TAURI_IPC__) return;
+    
+    try {
+      const enabled = await invoke<boolean>('get_auto_restart');
+      setAutoRestart(enabled);
+    } catch (error) {
+      console.error('Failed to load auto-restart setting:', error);
+    }
+  };
+
+  const handleAutoRestartChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.target.checked;
+    setAutoRestart(enabled);
+    
+    try {
+      await invoke('set_auto_restart', { enabled });
+      showNotification(
+        enabled ? '已启用进程崩溃自动重启' : '已禁用进程崩溃自动重启',
+        'success'
+      );
+    } catch (error) {
+      showNotification(`设置失败: ${error}`, 'error');
+      setAutoRestart(!enabled);
+    }
+  };
 
   const checkServiceStatus = async () => {
     if (typeof window === 'undefined' || !(window as any).__TAURI_IPC__) return;
@@ -147,6 +180,32 @@ const ServiceControl: React.FC<ServiceControlProps> = ({ isRunning, onStatusChan
           {(loading || serviceLoading) && <CircularProgress size={20} />}
         </Box>
 
+        {/* Auto Restart Setting */}
+        <Box sx={{ mb: 2 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={autoRestart}
+                onChange={handleAutoRestartChange}
+                color="primary"
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AutorenewOutlined fontSize="small" />
+                <Typography variant="body2">
+                  进程崩溃时自动重启 (Watchdog)
+                </Typography>
+              </Box>
+            }
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 4, display: 'block' }}>
+            启用后，进程意外退出时将在 5 秒内自动重启（最多尝试 5 次/分钟）
+          </Typography>
+        </Box>
+
+        <Divider sx={{ my: 2 }} />
+
         {/* Service Management Buttons */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {/* 未安装时：显示安装按钮 */}
@@ -213,6 +272,8 @@ const ServiceControl: React.FC<ServiceControlProps> = ({ isRunning, onStatusChan
       </CardContent>
     </Card>
   );
-};
+});
+
+ServiceControl.displayName = 'ServiceControl';
 
 export default ServiceControl;

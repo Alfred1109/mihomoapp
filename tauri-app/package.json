@@ -2,14 +2,15 @@
   "name": "mihomoapp",
   "version": "0.1.0",
   "description": "Mihomo management application built with Tauri, React, and MUI",
-  "main": "src/main.tsx",
+  "main": "frontend/main.tsx",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "prepare:resources": "node -e \"process.platform === 'win32' ? require('child_process').execSync('powershell -ExecutionPolicy Bypass -File prepare-resources.ps1', {stdio: 'inherit'}) : require('child_process').execSync('bash prepare-resources.sh', {stdio: 'inherit'})\""
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
@@ -24,7 +25,8 @@
     "i18next": "^25.8.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-i18next": "^16.5.3"
+    "react-i18next": "^16.5.3",
+    "zustand": "^5.0.10"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",

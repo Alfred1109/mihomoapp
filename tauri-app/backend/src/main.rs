@@ -6,6 +6,10 @@ mod config;
 mod subscription;
 mod backup;
 mod validator;
+mod events;
+mod watchdog;
+mod config_manager;
+mod error;
 
 use std::sync::Mutex;
 use tauri::{Manager, State, SystemTray, SystemTrayEvent, SystemTrayMenu, CustomMenuItem, SystemTrayMenuItem};
@@ -137,12 +141,31 @@ async fn get_mihomo_status(state: State<'_, AppStateType>) -> Result<bool, Strin
 }
 
 #[tauri::command]
-async fn start_mihomo_service(state: State<'_, AppStateType>) -> Result<String, String> {
+async fn start_mihomo_service(
+    state: State<'_, AppStateType>,
+    app: tauri::AppHandle,
+    watchdog: State<'_, std::sync::Arc<watchdog::ProcessWatchdog>>,
+) -> Result<String, String> {
     match mihomo::start_mihomo().await {
         Ok(process_id) => {
-            let mut app_state = state.lock().unwrap();
-            app_state.mihomo_running = true;
-            app_state.mihomo_process = Some(process_id);
+            {
+                let mut app_state = state.lock().unwrap();
+                app_state.mihomo_running = true;
+                app_state.mihomo_process = Some(process_id);
+            }
+            
+            // 更新 watchdog 跟踪的进程
+            watchdog.set_process(process_id).await;
+            
+            events::emit_mihomo_status(
+                &app,
+                events::MihomoStatusEvent {
+                    running: true,
+                    process_id: Some(process_id),
+                    timestamp: events::get_current_timestamp(),
+                },
+            );
+            
             Ok("Mihomo service started successfully".to_string())
         }
         Err(e) => Err(format!("Failed to start mihomo: {}", e)),
@@ -150,12 +173,31 @@ async fn start_mihomo_service(state: State<'_, AppStateType>) -> Result<String, 
 }
 
 #[tauri::command]
-async fn stop_mihomo_service(state: State<'_, AppStateType>) -> Result<String, String> {
+async fn stop_mihomo_service(
+    state: State<'_, AppStateType>,
+    app: tauri::AppHandle,
+    watchdog: State<'_, std::sync::Arc<watchdog::ProcessWatchdog>>,
+) -> Result<String, String> {
     match mihomo::stop_mihomo().await {
         Ok(_) => {
-            let mut app_state = state.lock().unwrap();
-            app_state.mihomo_running = false;
-            app_state.mihomo_process = None;
+            {
+                let mut app_state = state.lock().unwrap();
+                app_state.mihomo_running = false;
+                app_state.mihomo_process = None;
+            }
+            
+            // 清除 watchdog 跟踪
+            watchdog.clear_process().await;
+            
+            events::emit_mihomo_status(
+                &app,
+                events::MihomoStatusEvent {
+                    running: false,
+                    process_id: None,
+                    timestamp: events::get_current_timestamp(),
+                },
+            );
+            
             Ok("Mihomo service stopped successfully".to_string())
         }
         Err(e) => Err(format!("Failed to stop mihomo: {}", e)),
@@ -169,10 +211,25 @@ async fn get_mihomo_config() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn save_mihomo_config(config: serde_json::Value) -> Result<String, String> {
-    config::save_config(config).await
-        .map_err(|e| format!("Failed to save config: {}", e))
-        .map(|_| "Configuration saved successfully".to_string())
+async fn save_mihomo_config(
+    config: serde_json::Value,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    match config::save_config(config).await {
+        Ok(_) => {
+            events::emit_config_change(
+                &app,
+                events::ConfigChangeEvent {
+                    config_path: config::get_config_path()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    timestamp: events::get_current_timestamp(),
+                },
+            );
+            Ok("Configuration saved successfully".to_string())
+        }
+        Err(e) => Err(format!("Failed to save config: {}", e)),
+    }
 }
 
 #[tauri::command]
@@ -182,10 +239,25 @@ async fn get_proxies() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn switch_proxy(group_name: String, proxy_name: String) -> Result<String, String> {
-    mihomo::switch_proxy(&group_name, &proxy_name).await
-        .map_err(|e| format!("Failed to switch proxy: {}", e))
-        .map(|_| "Proxy switched successfully".to_string())
+async fn switch_proxy(
+    group_name: String,
+    proxy_name: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    match mihomo::switch_proxy(&group_name, &proxy_name).await {
+        Ok(_) => {
+            events::emit_proxy_change(
+                &app,
+                events::ProxyChangeEvent {
+                    group_name: group_name.clone(),
+                    proxy_name: proxy_name.clone(),
+                    timestamp: events::get_current_timestamp(),
+                },
+            );
+            Ok("Proxy switched successfully".to_string())
+        }
+        Err(e) => Err(format!("Failed to switch proxy: {}", e)),
+    }
 }
 
 #[tauri::command]
@@ -227,6 +299,22 @@ async fn enable_tun_mode(enable: bool) -> Result<String, String> {
     config::set_tun_mode(enable).await
         .map_err(|e| format!("Failed to set TUN mode: {}", e))
         .map(|_| if enable { "TUN mode enabled" } else { "TUN mode disabled" }.to_string())
+}
+
+#[tauri::command]
+async fn set_auto_restart(
+    enabled: bool,
+    watchdog: State<'_, std::sync::Arc<watchdog::ProcessWatchdog>>,
+) -> Result<String, String> {
+    watchdog.set_auto_restart(enabled).await;
+    Ok(format!("Auto-restart {}", if enabled { "enabled" } else { "disabled" }))
+}
+
+#[tauri::command]
+async fn get_auto_restart(
+    watchdog: State<'_, std::sync::Arc<watchdog::ProcessWatchdog>>,
+) -> Result<bool, String> {
+    Ok(watchdog.get_auto_restart().await)
 }
 
 #[tauri::command]
@@ -1188,6 +1276,8 @@ fn main() {
             delete_subscription,
             generate_config_from_subscriptions,
             enable_tun_mode,
+            set_auto_restart,
+            get_auto_restart,
             test_group_delay,
             test_all_proxies,
             validate_config,
@@ -1213,6 +1303,22 @@ fn main() {
             // Initialize application
             let window = app.get_window("main").unwrap();
             window.set_title("Mihomo Manager")?;
+            
+            // 初始化 ConfigManager
+            let config_path = config::get_config_path().map_err(|e| e.to_string())?;
+            tauri::async_runtime::block_on(async {
+                config_manager::init_config_manager(config_path).await;
+            });
+            
+            // 初始化 watchdog
+            let watchdog = std::sync::Arc::new(watchdog::ProcessWatchdog::new(app.handle()));
+            app.manage(watchdog.clone());
+            
+            // 启动 watchdog 监控
+            let watchdog_clone = watchdog.clone();
+            tauri::async_runtime::spawn(async move {
+                watchdog_clone.start_monitoring().await;
+            });
             
             // 检查是否启用静默启动
             let config_dir = dirs::config_dir();

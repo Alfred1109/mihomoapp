@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -55,7 +55,7 @@ interface Subscription {
   last_error?: string;
 }
 
-const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotification }) => {
+const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ showNotification }) => {
   const { t } = useTranslation();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(false);
@@ -366,6 +366,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = ({ showNotificat
       </Dialog>
     </Box>
   );
-};
+});
+
+SubscriptionManager.displayName = 'SubscriptionManager';
 
 export default SubscriptionManager;

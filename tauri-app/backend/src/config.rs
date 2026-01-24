@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use yaml_rust::{Yaml, YamlLoader, YamlEmitter};
+use yaml_rust::{Yaml, YamlEmitter};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,43 +42,23 @@ pub async fn load_config() -> Result<serde_json::Value> {
     let config_path = get_config_path()?;
     
     if !config_path.exists() {
-        // Create default config if it doesn't exist
         create_default_config(&config_path).await?;
     }
     
-    let content = fs::read_to_string(&config_path)
-        .context("Failed to read config file")?;
-    
-    let docs = YamlLoader::load_from_str(&content)
-        .context("Failed to parse YAML config")?;
-    
-    let doc = docs.get(0)
-        .ok_or_else(|| anyhow::anyhow!("Empty config file"))?;
-    
-    let json_value = yaml_to_json(doc)?;
-    Ok(json_value)
+    let manager = crate::config_manager::get_config_manager().await?;
+    manager.read_config().await
 }
 
 pub async fn save_config(config: serde_json::Value) -> Result<()> {
     let config_path = get_config_path()?;
     
-    // Ensure config directory exists
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .context("Failed to create config directory")?;
     }
     
-    // Create backup of existing config
-    if config_path.exists() {
-        create_backup(&config_path).await?;
-    }
-    
-    // Convert JSON to YAML and save
-    let yaml_content = json_to_yaml(&config)?;
-    fs::write(&config_path, yaml_content)
-        .context("Failed to write config file")?;
-    
-    Ok(())
+    let manager = crate::config_manager::get_config_manager().await?;
+    manager.write_config(config).await
 }
 
 pub async fn set_tun_mode(enable: bool) -> Result<()> {
@@ -225,32 +205,43 @@ async fn create_backup(config_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn get_config_path() -> Result<PathBuf> {
+pub fn get_config_path() -> Result<PathBuf> {
     let config_dir = get_mihomo_config_dir()?;
     Ok(config_dir.join("config.yaml"))
 }
 
 fn get_mihomo_config_dir() -> Result<PathBuf> {
-    // 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
-    let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        let user_home = PathBuf::from(format!("/home/{}", sudo_user));
-        user_home.join(".config").join("mihomo")
-    } else if let Ok(user) = std::env::var("USER") {
-        if user != "root" {
-            let user_home = PathBuf::from(format!("/home/{}", user));
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 使用 AppData/Roaming 目录
+        Ok(dirs::config_dir()
+            .context("Failed to get config directory")?
+            .join("mihomo"))
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Linux/Unix: 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
+        // 这样即使以 root 运行，也会使用实际用户的配置
+        let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+            let user_home = PathBuf::from(format!("/home/{}", sudo_user));
             user_home.join(".config").join("mihomo")
+        } else if let Ok(user) = std::env::var("USER") {
+            if user != "root" {
+                let user_home = PathBuf::from(format!("/home/{}", user));
+                user_home.join(".config").join("mihomo")
+            } else {
+                dirs::config_dir()
+                    .context("Failed to get config directory")?
+                    .join("mihomo")
+            }
         } else {
             dirs::config_dir()
                 .context("Failed to get config directory")?
                 .join("mihomo")
-        }
-    } else {
-        dirs::config_dir()
-            .context("Failed to get config directory")?
-            .join("mihomo")
-    };
-    
-    Ok(config_dir)
+        };
+        Ok(config_dir)
+    }
 }
 
 pub fn yaml_to_json(yaml: &Yaml) -> Result<serde_json::Value> {

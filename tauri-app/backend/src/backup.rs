@@ -115,26 +115,37 @@ fn get_config_path() -> Result<PathBuf> {
 }
 
 fn get_mihomo_config_dir() -> Result<PathBuf> {
-    // 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
-    let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        let user_home = PathBuf::from(format!("/home/{}", sudo_user));
-        user_home.join(".config").join("mihomo")
-    } else if let Ok(user) = std::env::var("USER") {
-        if user != "root" {
-            let user_home = PathBuf::from(format!("/home/{}", user));
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 使用 AppData/Roaming 目录
+        Ok(dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
+            .join("mihomo"))
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Linux/Unix: 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
+        // 这样即使以 root 运行，也会使用实际用户的配置
+        let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+            let user_home = PathBuf::from(format!("/home/{}", sudo_user));
             user_home.join(".config").join("mihomo")
+        } else if let Ok(user) = std::env::var("USER") {
+            if user != "root" {
+                let user_home = PathBuf::from(format!("/home/{}", user));
+                user_home.join(".config").join("mihomo")
+            } else {
+                dirs::config_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
+                    .join("mihomo")
+            }
         } else {
             dirs::config_dir()
                 .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
                 .join("mihomo")
-        }
-    } else {
-        dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
-            .join("mihomo")
-    };
-    
-    Ok(config_dir)
+        };
+        Ok(config_dir)
+    }
 }
 
 fn get_backup_dir() -> Result<PathBuf> {

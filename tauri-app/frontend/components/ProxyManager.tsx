@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Card,
@@ -58,7 +58,7 @@ interface ProxyGroup {
 type SortField = 'name' | 'type' | 'delay' | 'status';
 type SortOrder = 'asc' | 'desc';
 
-const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification }) => {
+const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showNotification }) => {
   const [proxies, setProxies] = useState<{ [key: string]: ProxyNode | ProxyGroup }>({});
   const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
@@ -502,6 +502,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = ({ isRunning, showNotification
       )}
     </Box>
   );
-};
+});
+
+ProxyManager.displayName = 'ProxyManager';
 
 export default ProxyManager;
