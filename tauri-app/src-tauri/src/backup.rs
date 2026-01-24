@@ -110,16 +110,31 @@ fn cleanup_old_backups(backup_dir: &PathBuf, keep_count: usize) -> Result<()> {
 }
 
 fn get_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Failed to get home directory"))?;
-    
-    #[cfg(target_os = "windows")]
-    let config_dir = home.join("AppData").join("Roaming").join("mihomo");
-    
-    #[cfg(not(target_os = "windows"))]
-    let config_dir = home.join(".config").join("mihomo");
-    
+    let config_dir = get_mihomo_config_dir()?;
     Ok(config_dir.join("config.yaml"))
+}
+
+fn get_mihomo_config_dir() -> Result<PathBuf> {
+    // 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
+    let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        let user_home = PathBuf::from(format!("/home/{}", sudo_user));
+        user_home.join(".config").join("mihomo")
+    } else if let Ok(user) = std::env::var("USER") {
+        if user != "root" {
+            let user_home = PathBuf::from(format!("/home/{}", user));
+            user_home.join(".config").join("mihomo")
+        } else {
+            dirs::config_dir()
+                .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
+                .join("mihomo")
+        }
+    } else {
+        dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))?
+            .join("mihomo")
+    };
+    
+    Ok(config_dir)
 }
 
 fn get_backup_dir() -> Result<PathBuf> {

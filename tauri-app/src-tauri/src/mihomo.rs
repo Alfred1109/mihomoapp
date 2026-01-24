@@ -474,9 +474,29 @@ async fn test_proxy_delay_optimized(
 }
 
 fn get_config_path() -> Result<String> {
-    let config_dir = dirs::config_dir()
-        .context("Failed to get config directory")?
-        .join("mihomo");
+    // 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
+    // 这样即使以 root 运行，也会使用实际用户的配置
+    let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        // 如果是通过 sudo 运行，使用 sudo 用户的配置目录
+        let user_home = std::path::PathBuf::from(format!("/home/{}", sudo_user));
+        user_home.join(".config").join("mihomo")
+    } else if let Ok(user) = std::env::var("USER") {
+        // 如果是普通用户，使用其配置目录
+        if user != "root" {
+            let user_home = std::path::PathBuf::from(format!("/home/{}", user));
+            user_home.join(".config").join("mihomo")
+        } else {
+            // root 用户使用默认配置目录
+            dirs::config_dir()
+                .context("Failed to get config directory")?
+                .join("mihomo")
+        }
+    } else {
+        // 后备方案：使用 dirs 库获取配置目录
+        dirs::config_dir()
+            .context("Failed to get config directory")?
+            .join("mihomo")
+    };
     
     let config_path = config_dir.join("config.yaml");
     
