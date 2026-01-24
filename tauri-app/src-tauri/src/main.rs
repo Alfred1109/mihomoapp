@@ -725,6 +725,55 @@ async fn stop_mihomo_service_cmd() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn restart_mihomo_service_cmd() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+
+        let app_dir = resolve_app_dir()?;
+        let winsw_source = resolve_winsw_source(&app_dir)?;
+        let mihomo_path = resolve_mihomo_path(&app_dir)?;
+        let config_path = dirs::config_dir()
+            .ok_or("无法获取配置目录")?
+            .join("mihomo")
+            .join("config.yaml");
+        let winsw_exe = ensure_winsw_files(&app_dir, &winsw_source, &mihomo_path, &config_path)?;
+        
+        // WinSW 支持 restart 命令
+        let output = Command::new(&winsw_exe)
+            .arg("restart")
+            .output()
+            .map_err(|e| format!("重启服务失败: {}", e))?;
+        
+        if output.status.success() {
+            Ok("mihomo 服务重启成功".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Err(format!("服务重启失败:\n标准输出: {}\n错误输出: {}", stdout, stderr))
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::process::Command;
+        
+        // 重启服务
+        let output = Command::new("systemctl")
+            .args(["restart", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("重启服务失败: {}", e))?;
+        
+        if output.status.success() {
+            Ok("Mihomo 服务重启成功".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("服务重启失败: {}", stderr))
+        }
+    }
+}
+
+#[tauri::command]
 async fn uninstall_mihomo_service() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1152,6 +1201,7 @@ fn main() {
             install_mihomo_service,
             start_mihomo_service_cmd,
             stop_mihomo_service_cmd,
+            restart_mihomo_service_cmd,
             uninstall_mihomo_service,
             get_mihomo_service_status,
             set_autostart,

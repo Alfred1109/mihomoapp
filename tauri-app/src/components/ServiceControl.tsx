@@ -81,13 +81,11 @@ const ServiceControl: React.FC<ServiceControlProps> = ({ isRunning, onStatusChan
   const handleRestart = async () => {
     setLoading(true);
     try {
-      await invoke('stop_mihomo_service');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await invoke('start_mihomo_service');
-      // 等待服务完全启动
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const result = await invoke<string>('restart_mihomo_service_cmd');
+      // 等待服务完全重启
+      await new Promise(resolve => setTimeout(resolve, 2000));
       await checkServiceStatus();
-      showNotification('Mihomo重启成功，配置已应用', 'success');
+      showNotification(result || 'Mihomo重启成功，配置已应用', 'success');
       // 立即更新父组件状态
       onStatusChange(true);
     } catch (error) {
