@@ -40,6 +40,10 @@
         "icons/icon.ico",
         "icons/icon.icns"
       ],
+      "resources": [
+        "resources/mihomo",
+        "resources/mihomo.exe"
+      ],
       "targets": ["deb", "msi", "nsis"],
       "deb": {
         "depends": [

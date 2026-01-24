@@ -78,9 +78,17 @@ pub async fn start_mihomo() -> Result<u32> {
             .ok_or_else(|| anyhow::anyhow!("无法获取应用目录"))?
             .to_path_buf();
         
-        let app_mihomo = app_dir.join(mihomo_binary);
-        if app_mihomo.exists() {
-            mihomo_path = Some(app_mihomo);
+        // 检查多个可能的位置
+        let possible_paths = vec![
+            app_dir.join(mihomo_binary),                    // 应用目录根目录
+            app_dir.join("resources").join(mihomo_binary),  // resources 子目录（Tauri 打包位置）
+        ];
+        
+        for path in possible_paths {
+            if path.exists() {
+                mihomo_path = Some(path);
+                break;
+            }
         }
     }
     
