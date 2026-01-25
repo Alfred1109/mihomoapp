@@ -40,7 +40,11 @@
         "icons/icon.ico",
         "icons/icon.icns"
       ],
-      "resources": [],
+      "resources": [
+        "resources/mihomo",
+        "resources/mihomo.exe",
+        "resources/winsw.exe"
+      ],
       "externalBin": [],
       "targets": ["deb", "msi", "nsis"],
       "deb": {
