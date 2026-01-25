@@ -62,7 +62,7 @@ function App() {
   });
 
   // 使用 Zustand store
-  const { mihomoStatus, isAdmin, adminCheckDone, setIsAdmin, setAdminCheckDone, initEventListeners } = useAppStore();
+  const { mihomoStatus, isAdmin, adminCheckDone, setIsAdmin, setAdminCheckDone, setMihomoStatus, initEventListeners } = useAppStore();
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -73,12 +73,28 @@ function App() {
     if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
       try {
         const serviceStatus = await invoke<string>('get_mihomo_service_status');
-        if (serviceStatus === 'running') {
-          return;
+        const isRunning = serviceStatus === 'running';
+        
+        // 更新 Zustand store
+        setMihomoStatus({
+          running: isRunning,
+          processId: null,
+          timestamp: Date.now(),
+        });
+        
+        if (!isRunning) {
+          // Fallback to direct process status
+          try {
+            const directStatus = await invoke<boolean>('get_mihomo_status');
+            setMihomoStatus({
+              running: directStatus,
+              processId: null,
+              timestamp: Date.now(),
+            });
+          } catch (e) {
+            console.error('Failed to get direct status:', e);
+          }
         }
-
-        // Fallback to direct process status
-        await invoke<boolean>('get_mihomo_status');
       } catch (error) {
         console.error('Failed to get mihomo status:', error);
       }
