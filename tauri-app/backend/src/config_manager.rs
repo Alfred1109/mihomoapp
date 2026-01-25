@@ -67,7 +67,10 @@ impl ConfigManager {
         
         // 然后打开文件进行同步和锁定
         {
-            let temp_file = File::open(&temp_path)
+            use std::fs::OpenOptions;
+            let temp_file = OpenOptions::new()
+                .write(true)
+                .open(&temp_path)
                 .context("Failed to open temp file")?;
             
             temp_file.lock_exclusive()
