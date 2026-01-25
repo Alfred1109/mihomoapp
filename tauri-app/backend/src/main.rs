@@ -136,7 +136,8 @@ type AppStateType = Mutex<AppState>;
 
 #[tauri::command]
 async fn get_mihomo_status(state: State<'_, AppStateType>) -> Result<bool, String> {
-    let app_state = state.lock().unwrap();
+    let app_state = state.lock()
+        .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
     Ok(app_state.mihomo_running)
 }
 
@@ -149,7 +150,8 @@ async fn start_mihomo_service(
     match mihomo::start_mihomo().await {
         Ok(process_id) => {
             {
-                let mut app_state = state.lock().unwrap();
+                let mut app_state = state.lock()
+                    .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
                 app_state.mihomo_running = true;
                 app_state.mihomo_process = Some(process_id);
             }
@@ -181,7 +183,8 @@ async fn stop_mihomo_service(
     match mihomo::stop_mihomo().await {
         Ok(_) => {
             {
-                let mut app_state = state.lock().unwrap();
+                let mut app_state = state.lock()
+                    .map_err(|e| format!("Failed to acquire state lock: {}", e))?;
                 app_state.mihomo_running = false;
                 app_state.mihomo_process = None;
             }
@@ -661,7 +664,9 @@ Group=root
 
 [Install]
 WantedBy=multi-user.target
-"#, mihomo_binary, config_path.parent().unwrap().display());
+"#, mihomo_binary, config_path.parent()
+            .ok_or_else(|| "Failed to get config directory".to_string())?
+            .display());
 
         // 写入 systemd 服务文件
         let service_file = "/etc/systemd/system/mihomo.service";
@@ -1088,7 +1093,9 @@ async fn set_silent_start(enable: bool) -> Result<String, String> {
         "silent_start": enable
     });
     
-    std::fs::write(&settings_file, serde_json::to_string_pretty(&settings).unwrap())
+    let settings_json = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("序列化设置失败: {}", e))?;
+    std::fs::write(&settings_file, settings_json)
         .map_err(|e| format!("保存设置失败: {}", e))?;
     
     if enable {
@@ -1219,20 +1226,23 @@ fn main() {
                 size: _,
                 ..
             } => {
-                let window = app.get_window("main").unwrap();
-                window.show().unwrap();
-                window.set_focus().unwrap();
+                if let Some(window) = app.get_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
             SystemTrayEvent::MenuItemClick { id, .. } => {
                 match id.as_str() {
                     "show" => {
-                        let window = app.get_window("main").unwrap();
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
+                        if let Some(window) = app.get_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
                     }
                     "hide" => {
-                        let window = app.get_window("main").unwrap();
-                        window.hide().unwrap();
+                        if let Some(window) = app.get_window("main") {
+                            let _ = window.hide();
+                        }
                     }
                     "start" => {
                         // 启动服务
@@ -1257,7 +1267,7 @@ fn main() {
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // 关闭窗口时最小化到托盘而不是退出
-                event.window().hide().unwrap();
+                let _ = event.window().hide();
                 api.prevent_close();
             }
             _ => {}
@@ -1301,7 +1311,8 @@ fn main() {
         ])
         .setup(|app| {
             // Initialize application
-            let window = app.get_window("main").unwrap();
+            let window = app.get_window("main")
+                .ok_or_else(|| "Failed to get main window")?;
             window.set_title("Mihomo Manager")?;
             
             // 初始化 ConfigManager
@@ -1347,5 +1358,6 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .map_err(|e| eprintln!("Error running tauri application: {}", e))
+        .ok();
 }

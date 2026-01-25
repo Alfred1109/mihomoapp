@@ -35,7 +35,10 @@ pub async fn start_mihomo() -> Result<u32> {
     let config_path = get_config_path()?;
     
     // Ensure config directory and file exist
-    std::fs::create_dir_all(std::path::Path::new(&config_path).parent().unwrap())
+    let config_dir = std::path::Path::new(&config_path)
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Failed to get config directory path"))?;
+    std::fs::create_dir_all(config_dir)
         .context("Failed to create config directory")?;
     
     if !std::path::Path::new(&config_path).exists() {

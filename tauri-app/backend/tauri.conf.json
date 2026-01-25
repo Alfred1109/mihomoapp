@@ -15,20 +15,43 @@
       "all": false,
       "shell": {
         "open": true,
-        "execute": true
+        "execute": true,
+        "scope": [
+          { "name": "mihomo", "cmd": "mihomo", "args": true },
+          { "name": "systemctl", "cmd": "systemctl", "args": ["start", "stop", "restart", "status", "enable", "disable", "daemon-reload"] },
+          { "name": "sc", "cmd": "sc", "args": ["query", "start", "stop", "delete", "create", "config"] },
+          { "name": "taskkill", "cmd": "taskkill", "args": ["/F", "/PID"] },
+          { "name": "pkill", "cmd": "pkill", "args": ["-9"] }
+        ]
       },
       "dialog": {
         "ask": true,
-        "message": true
+        "message": true,
+        "open": false,
+        "save": false
       },
       "fs": {
         "readFile": true,
         "writeFile": true,
-        "exists": true
+        "exists": true,
+        "readDir": false,
+        "copyFile": false,
+        "createDir": false,
+        "removeDir": false,
+        "removeFile": false,
+        "renameFile": false,
+        "scope": ["$APPCONFIG/**", "$RESOURCE/**"]
       },
       "os": {
-        "all": true
+        "all": false
+      },
+      "protocol": {
+        "asset": true,
+        "assetScope": ["$APPCONFIG/**", "$RESOURCE/**"]
       }
+    },
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://127.0.0.1:* http://localhost:*"
     },
     "bundle": {
       "active": true,
@@ -49,7 +72,7 @@
       "targets": ["deb", "msi", "nsis"],
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.1-0",
+          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
           "libayatana-appindicator3-1",
           "libgtk-3-0"
         ],

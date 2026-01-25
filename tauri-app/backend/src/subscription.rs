@@ -433,7 +433,8 @@ fn parse_proxy_url(url: &str) -> Result<serde_json::Value> {
 
 fn parse_shadowsocks_url(url: &str) -> Result<serde_json::Value> {
     // Basic SS URL parsing
-    let url = url.strip_prefix("ss://").unwrap();
+    let url = url.strip_prefix("ss://")
+        .ok_or_else(|| anyhow::anyhow!("Invalid SS URL: missing ss:// prefix"))?;
     
     // Decode base64 part
     let parts: Vec<&str> = url.splitn(2, '@').collect();
