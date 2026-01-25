@@ -61,15 +61,17 @@ impl ConfigManager {
         
         let temp_path = self.config_path.with_extension("yaml.tmp");
         
+        // 先写入临时文件
+        std::fs::write(&temp_path, yaml_content)
+            .context("Failed to write temp file")?;
+        
+        // 然后打开文件进行同步和锁定
         {
-            let temp_file = File::create(&temp_path)
-                .context("Failed to create temp file")?;
+            let temp_file = File::open(&temp_path)
+                .context("Failed to open temp file")?;
             
             temp_file.lock_exclusive()
                 .context("Failed to acquire exclusive lock")?;
-            
-            std::fs::write(&temp_path, yaml_content)
-                .context("Failed to write temp file")?;
             
             temp_file.sync_all()
                 .context("Failed to sync temp file")?;
