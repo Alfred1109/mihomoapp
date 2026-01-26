@@ -158,18 +158,20 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
                 "1.2.4.8"
             ],
             "nameserver": [
-                "https://cloudflare-dns.com/dns-query",
-                "https://dns.google/dns-query",
-                "https://77.88.8.8/dns-query",
-                "https://9.9.9.9/dns-query"
+                "https://doh.pub/dns-query",
+                "https://dns.alidns.com/dns-query"
             ],
             "proxy-server-nameserver": [
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
             ],
             "fallback": [
+                "https://cloudflare-dns.com/dns-query",
+                "https://dns.google/dns-query",
                 "https://1.1.1.1/dns-query",
                 "https://208.67.222.222/dns-query",
+                "https://77.88.8.8/dns-query",
+                "https://9.9.9.9/dns-query",
                 "tls://1.1.1.1:853",
                 "tls://8.8.8.8:853"
             ],
