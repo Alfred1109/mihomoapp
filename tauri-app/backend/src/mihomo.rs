@@ -480,19 +480,25 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
     // 找出所有代理组（Selector, URLTest, Fallback等）
     let group_types = ["Selector", "URLTest", "Fallback", "LoadBalance"];
     let mut groups = Vec::new();
+    let mut total_nodes = 0;
 
     for (name, proxy) in proxy_map {
         if let Some(proxy_type) = proxy["type"].as_str() {
             if group_types.contains(&proxy_type) {
                 groups.push(name.clone());
+                // 统计该组中的节点数量
+                if let Some(all_nodes) = proxy["all"].as_array() {
+                    total_nodes += all_nodes.len();
+                }
             }
         }
     }
 
-    info!("📊 找到 {} 个代理组", groups.len());
+    info!("📊 找到 {} 个代理组，共 {} 个节点", groups.len(), total_nodes);
 
     let mut success_count = 0;
     let mut failed_groups = Vec::new();
+    let mut results = std::collections::HashMap::new();
 
     // 对每个组进行测速
     for group_name in &groups {
@@ -509,13 +515,41 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
         }
     }
 
-    info!("✅ 批量测速完成！成功: {}/{}", success_count, groups.len());
+    // 获取测速后的代理信息，收集每个节点的延迟
+    let updated_proxies = get_proxies().await?;
+    let updated_proxy_map = updated_proxies["proxies"]
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Invalid proxies response"))?;
+
+    let mut tested_nodes = 0;
+    let mut success_nodes = 0;
+
+    for (name, proxy) in updated_proxy_map {
+        // 只统计真实的代理节点（不是代理组）
+        if let Some(proxy_type) = proxy["type"].as_str() {
+            if !group_types.contains(&proxy_type) && proxy_type != "Direct" && proxy_type != "Reject" {
+                tested_nodes += 1;
+                if let Some(history) = proxy["history"].as_array() {
+                    if !history.is_empty() {
+                        if let Some(delay) = history.last().and_then(|h| h["delay"].as_i64()) {
+                            results.insert(name.clone(), if delay > 0 { Some(delay) } else { None });
+                            if delay > 0 {
+                                success_nodes += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    info!("✅ 批量测速完成！成功: {}/{} 个节点", success_nodes, tested_nodes);
 
     Ok(serde_json::json!({
-        "total": groups.len(),
-        "success": success_count,
-        "failed": failed_groups.len(),
-        "failed_groups": failed_groups
+        "total": tested_nodes,
+        "tested": tested_nodes,
+        "success": success_nodes,
+        "results": results
     }))
 }
 

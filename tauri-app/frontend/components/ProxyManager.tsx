@@ -1,15 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Card,
   CardContent,
   Typography,
-  Grid,
   Button,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
   Table,
   TableBody,
   TableCell,
@@ -18,7 +13,6 @@ import {
   TableRow,
   Paper,
   Chip,
-  IconButton,
   LinearProgress,
   Alert,
   TableSortLabel,
@@ -45,6 +39,7 @@ interface ProxyNode {
   type: string;
   delay?: number;
   alive: boolean;
+  history?: Array<{ delay: number; time: string }>;
 }
 
 interface ProxyGroup {
@@ -72,7 +67,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     const excludeBuiltinGroups = ['GLOBAL', 'COMPATIBLE', 'PASS', 'DIRECT', 'REJECT', 'REJECT-DROP', 'auto'];
     const proxyGroups: ProxyGroup[] = [];
     Object.entries(response.proxies || {}).forEach(([name, proxy]: [string, any]) => {
-      if ((proxy.type === 'Selector' || proxy.type === 'URLTest' || proxy.type === 'Fallback') 
+      if ((proxy.type === 'Selector' || proxy.type === 'URLTest' || proxy.type === 'Fallback' || proxy.type === 'LoadBalance') 
           && !excludeBuiltinGroups.includes(name)) {
         proxyGroups.push({
           name,
@@ -92,9 +87,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     });
     
     setGroups(proxyGroups);
-    // 始终选中PROXY组（因为移除了卡片选择）
+    // 优先选中PROXY组，如果不存在则选第一个可用组
     if (proxyGroups.length > 0) {
-      setSelectedGroup('PROXY');
+      const hasProxy = proxyGroups.some(g => g.name === 'PROXY');
+      setSelectedGroup(hasProxy ? 'PROXY' : proxyGroups[0].name);
     }
   };
 
@@ -183,13 +179,13 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   };
 
   const formatDelay = (delay?: number): string => {
-    if (!delay) return 'N/A';
-    if (delay < 0) return 'Timeout';
+    if (delay === undefined || delay === null) return 'N/A';
+    if (delay <= 0) return 'Timeout';
     return `${delay}ms`;
   };
 
   const getDelayColor = (delay?: number): 'success' | 'warning' | 'error' | 'default' => {
-    if (!delay || delay < 0) return 'default';
+    if (delay === undefined || delay === null || delay <= 0) return 'default';
     if (delay < 100) return 'success';
     if (delay < 300) return 'warning';
     return 'error';
@@ -221,9 +217,12 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           compareResult = (nodeA?.type || '').localeCompare(nodeB?.type || '');
           break;
         case 'delay':
-          const delayA = nodeA?.history?.[0]?.delay || 999999;
-          const delayB = nodeB?.history?.[0]?.delay || 999999;
-          compareResult = delayA - delayB;
+          // 使用最新的测速记录（数组最后一个元素）
+          const historyA = nodeA?.history;
+          const historyB = nodeB?.history;
+          const delayA = (historyA && historyA.length > 0) ? historyA[historyA.length - 1]?.delay : 999999;
+          const delayB = (historyB && historyB.length > 0) ? historyB[historyB.length - 1]?.delay : 999999;
+          compareResult = (delayA || 999999) - (delayB || 999999);
           break;
         case 'status':
           const statusA = nodeA?.alive === true ? 1 : 0;
@@ -385,8 +384,9 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                       {sortNodes(group.all).map((nodeName) => {
                         const node = proxies[nodeName] as any;
                         const isActive = group.now === nodeName;
-                        // 从节点自身的history字段获取最新延迟
-                        const nodeDelay = node?.history?.[0]?.delay;
+                        // 从节点自身的history字段获取最新延迟（数组最后一个元素）
+                        const history = node?.history;
+                        const nodeDelay = (history && history.length > 0) ? history[history.length - 1]?.delay : undefined;
                         
                         return (
                           <TableRow 
@@ -416,9 +416,9 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             <TableCell>
                               <Chip
                                 icon={node?.alive === true ? <CheckCircle /> : <Error />}
-                                label={node?.alive === true ? '在线' : (nodeDelay ? '未知' : '离线')}
+                                label={node?.alive === true ? '在线' : '离线'}
                                 size="small"
-                                color={node?.alive === true ? 'success' : (nodeDelay ? 'warning' : 'error')}
+                                color={node?.alive === true ? 'success' : 'error'}
                               />
                             </TableCell>
                             <TableCell>
@@ -446,13 +446,36 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       {/* Connection History */}
       {selectedGroup && (() => {
         const group = groups.find(g => g.name === selectedGroup);
-        if (!group?.history?.length) return null;
+        if (!group) return null;
+
+        // 收集该组所有节点的测速历史
+        const nodeHistories: Array<{ name: string; delay: number; time: string }> = [];
+        
+        group.all.forEach((nodeName) => {
+          const node = proxies[nodeName];
+          if (node && node.history && Array.isArray(node.history) && node.history.length > 0) {
+            // 获取该节点最新的测速记录
+            const latestHistory = node.history[node.history.length - 1];
+            if (latestHistory && latestHistory.time) {
+              nodeHistories.push({
+                name: nodeName,
+                delay: latestHistory.delay || 0,
+                time: latestHistory.time
+              });
+            }
+          }
+        });
+
+        // 按时间排序，最新的在前
+        nodeHistories.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+        if (nodeHistories.length === 0) return null;
 
         return (
           <Card sx={{ mt: 3 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Connection History for {selectedGroup}
+                Latest Speed Test Results for {selectedGroup}
               </Typography>
               
               <TableContainer component={Paper}>
@@ -465,7 +488,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {group.history.slice(0, 10).map((item, index) => (
+                    {nodeHistories.slice(0, 10).map((item, index) => (
                       <TableRow key={index}>
                         <TableCell>{item.name}</TableCell>
                         <TableCell>
