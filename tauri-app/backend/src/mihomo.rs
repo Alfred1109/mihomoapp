@@ -496,7 +496,6 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
 
     info!("📊 找到 {} 个代理组，共 {} 个节点", groups.len(), total_nodes);
 
-    let mut success_count = 0;
     let mut failed_groups = Vec::new();
     let mut results = std::collections::HashMap::new();
 
@@ -505,7 +504,6 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
         info!("测试代理组: {}", group_name);
         match test_group_delay(group_name).await {
             Ok(_) => {
-                success_count += 1;
                 info!("  ✓ {} 测速完成", group_name);
             }
             Err(e) => {
