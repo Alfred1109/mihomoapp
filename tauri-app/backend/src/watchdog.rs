@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use sysinfo::{System, Pid, ProcessRefreshKind};
 use tracing::{info, warn, error};
 
 pub struct ProcessWatchdog {
@@ -84,6 +83,7 @@ impl ProcessWatchdog {
         let app_handle = self.app_handle.clone();
         let monitoring_flag = self.monitoring.clone();
         let last_known_status = self.last_known_status.clone();
+        let manual_stop = self.manual_stop.clone();
         
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(3));
@@ -149,7 +149,7 @@ impl ProcessWatchdog {
                         
                         // 检查是否为手动停止
                         let is_manual_stop = {
-                            let manual_stop_lock = self.manual_stop.read().await;
+                            let manual_stop_lock = manual_stop.read().await;
                             *manual_stop_lock
                         };
                         
