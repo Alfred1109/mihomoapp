@@ -472,8 +472,23 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
                 使用 mihomo 的内置 DNS 服务器
               </Typography>
 
+              <Box sx={{ mt: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={config.dns?.ipv6 === true}
+                      onChange={(e) => updateConfig('dns.ipv6', e.target.checked)}
+                    />
+                  }
+                  label="启用 IPv6"
+                />
+                <Typography variant="body2" color="text.secondary">
+                  启用 IPv6 DNS 解析，可能提升解析速度（需要网络支持）
+                </Typography>
+              </Box>
+
               {config.dns?.enable !== false && (
-                <Grid container spacing={2}>
+                <Grid container spacing={2} sx={{ mt: 1 }}>
                   <Grid item xs={12}>
                     <TextField
                       label="DNS 监听地址"

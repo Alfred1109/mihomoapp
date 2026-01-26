@@ -159,7 +159,9 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             ],
             "nameserver": [
                 "https://doh.pub/dns-query",
-                "https://dns.alidns.com/dns-query"
+                "https://dns.alidns.com/dns-query",
+                "https://[2400:3200::1]/dns-query",
+                "https://[2400:3200:baba::1]/dns-query"
             ],
             "proxy-server-nameserver": [
                 "https://doh.pub/dns-query",
@@ -173,7 +175,9 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
                 "https://77.88.8.8/dns-query",
                 "https://9.9.9.9/dns-query",
                 "tls://1.1.1.1:853",
-                "tls://8.8.8.8:853"
+                "tls://8.8.8.8:853",
+                "https://[2606:4700:4700::1111]/dns-query",
+                "https://[2001:4860:4860::8888]/dns-query"
             ],
             "fallback-filter": {
                 "geoip": true,
