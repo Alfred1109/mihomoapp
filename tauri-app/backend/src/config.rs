@@ -46,7 +46,12 @@ pub async fn load_config() -> Result<serde_json::Value> {
     }
 
     let manager = crate::config_manager::get_config_manager().await?;
-    manager.read_config().await
+    let mut config = manager.read_config().await?;
+
+    // 检查并升级配置版本
+    upgrade_config_if_needed(&mut config).await?;
+
+    Ok(config)
 }
 
 pub async fn save_config(config: serde_json::Value) -> Result<()> {
@@ -119,8 +124,110 @@ pub async fn set_tun_mode(enable: bool) -> Result<()> {
     save_config(config).await
 }
 
+const CONFIG_VERSION: u32 = 2; // 当前配置版本
+
+async fn upgrade_config_if_needed(config: &mut serde_json::Value) -> Result<()> {
+    let current_version = config
+        .get("config_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as u32;
+
+    if current_version >= CONFIG_VERSION {
+        return Ok(()); // 已是最新版本
+    }
+
+    tracing::info!("检测到旧配置版本 {}，升级到版本 {}", current_version, CONFIG_VERSION);
+
+    // 版本 1 -> 2: 性能优化
+    if current_version < 2 {
+        upgrade_to_v2(config).await?;
+    }
+
+    // 保存升级后的配置
+    save_config(config.clone()).await?;
+    tracing::info!("配置已升级到版本 {}", CONFIG_VERSION);
+
+    Ok(())
+}
+
+async fn upgrade_to_v2(config: &mut serde_json::Value) -> Result<()> {
+    tracing::info!("应用 v2 性能优化...");
+
+    // 更新版本号
+    config["config_version"] = serde_json::json!(2);
+
+    // 优化 DNS 配置
+    if let Some(dns) = config.get_mut("dns") {
+        // 启用 HTTP/3
+        dns["prefer-h3"] = serde_json::json!(true);
+
+        // 移除 IPv6 DNS 服务器（如果存在）
+        if let Some(nameservers) = dns.get_mut("nameserver").and_then(|v| v.as_array_mut()) {
+            nameservers.retain(|ns| {
+                if let Some(s) = ns.as_str() {
+                    !s.contains("[2400:3200") // 移除 IPv6 地址
+                } else {
+                    true
+                }
+            });
+        }
+
+        // 优化 fallback DNS（只保留 2 个）
+        if let Some(fallback) = dns.get_mut("fallback").and_then(|v| v.as_array_mut()) {
+            if fallback.len() > 2 {
+                fallback.clear();
+                fallback.push(serde_json::json!("https://1.1.1.1/dns-query"));
+                fallback.push(serde_json::json!("https://dns.google/dns-query"));
+            }
+        }
+
+        // 优化 nameserver-policy
+        if let Some(policy) = dns.get_mut("nameserver-policy") {
+            if let Some(geolocation) = policy.get_mut("geosite:geolocation-!cn") {
+                *geolocation = serde_json::json!([
+                    "https://1.1.1.1/dns-query",
+                    "https://dns.google/dns-query"
+                ]);
+            }
+        }
+    }
+
+    // 确保性能优化参数已启用
+    if config.get("unified-delay").is_none() {
+        config["unified-delay"] = serde_json::json!(true);
+    }
+    if config.get("tcp-concurrent").is_none() {
+        config["tcp-concurrent"] = serde_json::json!(true);
+    }
+
+    // 检查并修复路由规则
+    if let Some(rules) = config.get_mut("rules").and_then(|v| v.as_array_mut()) {
+        // 确保有 GEOSITE,geolocation-!cn,PROXY 规则
+        let has_geolocation_rule = rules.iter().any(|r| {
+            r.as_str()
+                .map(|s| s.contains("geolocation-!cn"))
+                .unwrap_or(false)
+        });
+
+        if !has_geolocation_rule {
+            // 在 GEOIP 规则之前插入
+            if let Some(pos) = rules.iter().position(|r| {
+                r.as_str()
+                    .map(|s| s.starts_with("GEOIP,"))
+                    .unwrap_or(false)
+            }) {
+                rules.insert(pos, serde_json::json!("GEOSITE,geolocation-!cn,PROXY"));
+            }
+        }
+    }
+
+    tracing::info!("v2 性能优化已应用");
+    Ok(())
+}
+
 async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
     let default_config = serde_json::json!({
+        "config_version": CONFIG_VERSION,
         "port": 7890,
         "socks-port": 7891,
         "mixed-port": 7890,
