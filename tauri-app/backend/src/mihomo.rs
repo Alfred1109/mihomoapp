@@ -446,7 +446,7 @@ pub async fn test_proxy_delay(proxy_name: &str, timeout: u32, test_url: &str) ->
     let response = client
         .get(format!("http://127.0.0.1:9090/proxies/{}/delay", proxy_name))
         .query(&[
-            ("timeout", &timeout.to_string()),
+            ("timeout", timeout.to_string().as_str()),
             ("url", test_url),
         ])
         .send()
