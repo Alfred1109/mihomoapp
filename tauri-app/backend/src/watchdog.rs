@@ -9,6 +9,23 @@ pub struct ProcessWatchdog {
     auto_restart: Arc<RwLock<bool>>,
     app_handle: tauri::AppHandle,
     monitoring: Arc<RwLock<bool>>,
+    last_known_status: Arc<RwLock<bool>>,
+}
+
+/// 检查 mihomo API 是否可访问（健康检查）
+async fn check_mihomo_api_health() -> bool {
+    match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => {
+            match client.get("http://127.0.0.1:9090/version").send().await {
+                Ok(response) => response.status().is_success(),
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    }
 }
 
 impl ProcessWatchdog {
@@ -18,6 +35,7 @@ impl ProcessWatchdog {
             auto_restart: Arc::new(RwLock::new(true)),
             app_handle,
             monitoring: Arc::new(RwLock::new(false)),
+            last_known_status: Arc::new(RwLock::new(false)),
         }
     }
     
@@ -57,16 +75,16 @@ impl ProcessWatchdog {
         let auto_restart = self.auto_restart.clone();
         let app_handle = self.app_handle.clone();
         let monitoring_flag = self.monitoring.clone();
+        let last_known_status = self.last_known_status.clone();
         
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(3));
-            let mut system = System::new();
             let mut restart_count = 0;
             let max_restart_attempts = 5;
             let restart_window = Duration::from_secs(60);
             let mut last_restart_time = std::time::Instant::now();
             
-            info!("Watchdog monitoring started");
+            info!("Watchdog monitoring started (API health check mode)");
             
             loop {
                 interval.tick().await;
@@ -81,34 +99,40 @@ impl ProcessWatchdog {
                     break;
                 }
                 
-                let pid = {
-                    let pid_lock = process_id.read().await;
-                    *pid_lock
+                // 使用 API 健康检查替代进程检查
+                let api_healthy = check_mihomo_api_health().await;
+                
+                let last_status = {
+                    let status = last_known_status.read().await;
+                    *status
                 };
                 
-                if let Some(pid) = pid {
-                    system.refresh_processes_specifics(
-                        ProcessRefreshKind::new()
+                // 只在状态变化时发送事件
+                if api_healthy != last_status {
+                    info!("Mihomo status changed: {} -> {}", last_status, api_healthy);
+                    
+                    {
+                        let mut status = last_known_status.write().await;
+                        *status = api_healthy;
+                    }
+                    
+                    crate::events::emit_mihomo_status(
+                        &app_handle,
+                        crate::events::MihomoStatusEvent {
+                            running: api_healthy,
+                            process_id: None,
+                            timestamp: crate::events::get_current_timestamp(),
+                        },
                     );
                     
-                    let process_exists = system.process(Pid::from_u32(pid)).is_some();
-                    
-                    if !process_exists {
-                        warn!("Mihomo process {} not found, may have crashed", pid);
+                    // 如果服务停止且启用了自动重启
+                    if !api_healthy {
+                        warn!("Mihomo API is not responding, service may have stopped");
                         
                         {
                             let mut pid_lock = process_id.write().await;
                             *pid_lock = None;
                         }
-                        
-                        crate::events::emit_mihomo_status(
-                            &app_handle,
-                            crate::events::MihomoStatusEvent {
-                                running: false,
-                                process_id: None,
-                                timestamp: crate::events::get_current_timestamp(),
-                            },
-                        );
                         
                         let should_restart = {
                             let restart_lock = auto_restart.read().await;
@@ -146,15 +170,6 @@ impl ProcessWatchdog {
                                         *pid_lock = Some(new_pid);
                                     }
                                     
-                                    crate::events::emit_mihomo_status(
-                                        &app_handle,
-                                        crate::events::MihomoStatusEvent {
-                                            running: true,
-                                            process_id: Some(new_pid),
-                                            timestamp: crate::events::get_current_timestamp(),
-                                        },
-                                    );
-                                    
                                     restart_count = 0;
                                 }
                                 Err(e) => {
@@ -162,6 +177,9 @@ impl ProcessWatchdog {
                                 }
                             }
                         }
+                    } else {
+                        // 服务恢复运行，重置重启计数
+                        restart_count = 0;
                     }
                 }
             }
