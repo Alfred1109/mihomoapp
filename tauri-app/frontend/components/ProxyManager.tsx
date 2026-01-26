@@ -217,11 +217,11 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           compareResult = (nodeA?.type || '').localeCompare(nodeB?.type || '');
           break;
         case 'delay':
-          // 使用最新的测速记录（数组最后一个元素）
+          // 使用最新的测速记录（Mihomo的history是倒序的，最新在索引0）
           const historyA = nodeA?.history;
           const historyB = nodeB?.history;
-          const delayA = (historyA && historyA.length > 0) ? historyA[historyA.length - 1]?.delay : 999999;
-          const delayB = (historyB && historyB.length > 0) ? historyB[historyB.length - 1]?.delay : 999999;
+          const delayA = (historyA && historyA.length > 0) ? historyA[0]?.delay : 999999;
+          const delayB = (historyB && historyB.length > 0) ? historyB[0]?.delay : 999999;
           compareResult = (delayA || 999999) - (delayB || 999999);
           break;
         case 'status':
@@ -384,9 +384,9 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                       {sortNodes(group.all).map((nodeName) => {
                         const node = proxies[nodeName] as any;
                         const isActive = group.now === nodeName;
-                        // 从节点自身的history字段获取最新延迟（数组最后一个元素）
+                        // 从节点自身的history字段获取最新延迟（Mihomo的history是倒序的，最新在索引0）
                         const history = node?.history;
-                        const nodeDelay = (history && history.length > 0) ? history[history.length - 1]?.delay : undefined;
+                        const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
                         
                         return (
                           <TableRow 
@@ -414,12 +414,19 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                               />
                             </TableCell>
                             <TableCell>
-                              <Chip
-                                icon={node?.alive === true ? <CheckCircle /> : <Error />}
-                                label={node?.alive === true ? '在线' : '离线'}
-                                size="small"
-                                color={node?.alive === true ? 'success' : 'error'}
-                              />
+                              {(() => {
+                                // 如果有有效的延迟数据，说明节点可用
+                                const hasValidDelay = nodeDelay !== undefined && nodeDelay > 0;
+                                const isOnline = node?.alive === true || hasValidDelay;
+                                return (
+                                  <Chip
+                                    icon={isOnline ? <CheckCircle /> : <Error />}
+                                    label={isOnline ? '在线' : '离线'}
+                                    size="small"
+                                    color={isOnline ? 'success' : 'error'}
+                                  />
+                                );
+                              })()}
                             </TableCell>
                             <TableCell>
                               <Button
@@ -454,8 +461,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
         group.all.forEach((nodeName) => {
           const node = proxies[nodeName];
           if (node && node.history && Array.isArray(node.history) && node.history.length > 0) {
-            // 获取该节点最新的测速记录
-            const latestHistory = node.history[node.history.length - 1];
+            // 获取该节点最新的测速记录（Mihomo的history是倒序的，最新在索引0）
+            const latestHistory = node.history[0];
             if (latestHistory && latestHistory.time) {
               nodeHistories.push({
                 name: nodeName,
@@ -466,7 +473,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           }
         });
 
-        // 按时间排序，最新的在前
+        // 按时间排序，最新的在前（history已经是倒序，但不同节点间需要排序）
         nodeHistories.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 
         if (nodeHistories.length === 0) return null;
