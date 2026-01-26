@@ -279,9 +279,10 @@ pub fn create_default_config() -> serde_json::Value {
             "GEOSITE,microsoft@cn,DIRECT",
             "GEOSITE,steam@cn,DIRECT",
             "GEOSITE,category-games@cn,DIRECT",
+            "GEOSITE,geolocation-!cn,PROXY",
             "GEOIP,LAN,DIRECT,no-resolve",
             "GEOIP,CN,DIRECT,no-resolve",
-            "MATCH,DIRECT"
+            "MATCH,PROXY"
         ]
     })
 }

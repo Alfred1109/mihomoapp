@@ -192,10 +192,6 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
 
     // 使用原子更新防止竞态条件（内部会自动备份）
     crate::config::update_config(|config| {
-        // 启用nyanpasu的关键优化配置
-        config["unified-delay"] = serde_json::json!(true);
-        config["tcp-concurrent"] = serde_json::json!(true);
-
         config["proxies"] = serde_json::json!(all_proxies);
 
         // Create or update proxy groups
@@ -214,7 +210,7 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
                 "name": "auto",
                 "type": "url-test",
                 "proxies": proxy_names.clone(),
-                "url": "http://1.1.1.1",
+                "url": "http://www.gstatic.com/generate_204",
                 "interval": 300,
                 "tolerance": 50
             }),
