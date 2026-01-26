@@ -8,8 +8,8 @@
 ## 🎯 重构目标
 
 解决项目文件夹命名混淆问题：
-- `src` → `frontend` (前端代码)
-- `src-tauri` → `backend` (后端 Rust 代码)
+- `frontend` → `frontend` (前端代码)
+- `backend` → `backend` (后端 Rust 代码)
 
 ---
 
@@ -20,7 +20,7 @@
 #### 1.1 vite.config.ts
 ```typescript
 // 修改前
-ignored: ["**/src-tauri/**"]
+ignored: ["**/backend/**"]
 
 // 修改后
 ignored: ["**/backend/**"]
@@ -47,7 +47,7 @@ ignored: ["**/backend/**"]
 #### 1.4 prepare-resources.ps1 (Windows)
 ```powershell
 # 修改前
-$ResourcesDir = "src-tauri\resources"
+$ResourcesDir = "backend\resources"
 
 # 修改后
 $ResourcesDir = "backend\resources"
@@ -56,7 +56,7 @@ $ResourcesDir = "backend\resources"
 #### 1.5 prepare-resources.sh (Linux/macOS)
 ```bash
 # 修改前
-RESOURCES_DIR="src-tauri/resources"
+RESOURCES_DIR="backend/resources"
 
 # 修改后
 RESOURCES_DIR="backend/resources"
@@ -68,8 +68,8 @@ RESOURCES_DIR="backend/resources"
 
 | 原名称 | 新名称 | 内容 |
 |--------|--------|------|
-| `src` | `frontend` | React 前端代码 (19 个文件) |
-| `src-tauri` | `backend` | Rust 后端代码 (5133 个文件) |
+| `frontend` | `frontend` | React 前端代码 (19 个文件) |
+| `backend` | `backend` | Rust 后端代码 (5133 个文件) |
 
 ---
 
@@ -84,7 +84,7 @@ tauri-app/
 │   ├── App.tsx           # 主应用组件
 │   └── main.tsx          # 入口文件
 │
-├── backend/              # 后端代码 (原 src-tauri)
+├── backend/              # 后端代码 (原 backend)
 │   ├── src/              # Rust 源代码
 │   │   ├── main.rs       # 主入口
 │   │   ├── events.rs     # 事件系统
@@ -133,7 +133,7 @@ cargo check
 ```
 tauri-app/
 ├── src/              ❌ 混淆：是前端还是后端？
-└── src-tauri/
+└── backend/
     └── src/          ❌ 混淆：两个 src 文件夹
 ```
 
@@ -168,8 +168,8 @@ tauri-app/
 5. ✅ `prepare-resources.sh` - 修改资源目录路径
 
 ### 文件夹重命名 (2 个)
-1. ✅ `src` → `frontend`
-2. ✅ `src-tauri` → `backend`
+1. ✅ `frontend` → `frontend`
+2. ✅ `backend` → `backend`
 
 ---
 
@@ -179,7 +179,7 @@ tauri-app/
 ```powershell
 # 重命名文件夹
 Move-Item -Path "src" -Destination "frontend" -Force
-Move-Item -Path "src-tauri" -Destination "backend" -Force
+Move-Item -Path "backend" -Destination "backend" -Force
 
 # 验证编译
 npm run build
@@ -187,10 +187,10 @@ cargo check
 ```
 
 ### 路径引用更新
-- Vite 配置: `**/src-tauri/**` → `**/backend/**`
+- Vite 配置: `**/backend/**` → `**/backend/**`
 - HTML 入口: `/src/main.tsx` → `/frontend/main.tsx`
 - Package.json: `src/main.tsx` → `frontend/main.tsx`
-- 资源脚本: `src-tauri/resources` → `backend/resources`
+- 资源脚本: `backend/resources` → `backend/resources`
 
 ---
 

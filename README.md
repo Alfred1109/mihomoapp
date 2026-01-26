@@ -62,8 +62,8 @@ npm run tauri:build
 ```
 mihomo-manager/
 ├── tauri-app/
-│   ├── src/              # React + MUI 前端
-│   ├── src-tauri/        # Rust 后端
+│   ├── frontend/         # React + MUI 前端
+│   ├── backend/          # Rust 后端
 │   │   ├── src/
 │   │   │   ├── main.rs           # Tauri 主程序
 │   │   │   ├── mihomo.rs         # Mihomo 服务管理

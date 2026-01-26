@@ -28,7 +28,7 @@ Phase 5: 测试和验证            ░░░░░░░░░░░░░░�
 ### 完成的任务
 
 #### Task 1.1: 实现 Tauri Events 状态推送 ✅
-- ✅ 创建 `src-tauri/src/events.rs` 模块
+- ✅ 创建 `backend/src/events.rs` 模块
 - ✅ 定义 `MihomoStatusEvent` 事件类型
 - ✅ 定义 `ConfigChangeEvent` 事件类型
 - ✅ 定义 `ProxyChangeEvent` 事件类型
@@ -64,7 +64,7 @@ Phase 5: 测试和验证            ░░░░░░░░░░░░░░�
 
 #### Task 2.1: 实现进程监控 Watchdog ⏳
 **需要做的**:
-- [ ] 创建 `src-tauri/src/watchdog.rs` 模块
+- [ ] 创建 `backend/src/watchdog.rs` 模块
 - [ ] 实现 `ProcessWatchdog` 结构体
 - [ ] 实现进程存活检查（每 3 秒）
 - [ ] 使用 `sysinfo` crate 检测进程状态
@@ -109,7 +109,7 @@ tracing-subscriber = "0.3"
 
 #### Task 3.1: 实现配置文件锁机制 ⏳
 **需要做的**:
-- [ ] 创建 `src-tauri/src/config_manager.rs` 模块
+- [ ] 创建 `backend/src/config_manager.rs` 模块
 - [ ] 实现 `ConfigManager` 结构体
 - [ ] 使用 `fs2` crate 实现文件锁
 - [ ] 实现带锁的读取函数 `read_config()`
@@ -155,7 +155,7 @@ chrono = "0.4"
 
 #### Task 4.1: 定义错误枚举 ⏳
 **需要做的**:
-- [ ] 创建 `src-tauri/src/error.rs` 模块
+- [ ] 创建 `backend/src/error.rs` 模块
 - [ ] 使用 `thiserror` 定义 `AppError` 枚举
 - [ ] 定义各类错误类型（配置、进程、网络等）
 - [ ] 实现错误转换 `From<AppError> for String`

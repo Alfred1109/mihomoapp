@@ -30,11 +30,11 @@
 
 #### Task 1.1: 实现 Tauri Events 状态推送
 
-**文件**: `src-tauri/src/main.rs`, `src-tauri/src/mihomo.rs`
+**文件**: `backend/src/main.rs`, `backend/src/mihomo.rs`
 
 **实现内容**:
 ```rust
-// src-tauri/src/events.rs (新建)
+// backend/src/events.rs (新建)
 use tauri::Manager;
 use serde::{Serialize, Deserialize};
 
@@ -154,11 +154,11 @@ export const useAppStore = create<AppStore>((set) => ({
 
 #### Task 2.1: 实现进程监控 Watchdog
 
-**文件**: `src-tauri/src/watchdog.rs` (新建)
+**文件**: `backend/src/watchdog.rs` (新建)
 
 **实现内容**:
 ```rust
-// src-tauri/src/watchdog.rs
+// backend/src/watchdog.rs
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
@@ -358,11 +358,11 @@ const handleAutoRestartChange = async (event: React.ChangeEvent<HTMLInputElement
 
 #### Task 3.1: 实现配置文件锁机制
 
-**文件**: `src-tauri/src/config_manager.rs` (新建)
+**文件**: `backend/src/config_manager.rs` (新建)
 
 **实现内容**:
 ```rust
-// src-tauri/src/config_manager.rs
+// backend/src/config_manager.rs
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::path::PathBuf;
@@ -518,7 +518,7 @@ chrono = "0.4"
 
 #### Task 3.2: 重构现有配置操作
 
-**文件**: `src-tauri/src/config.rs`, `src-tauri/src/subscription.rs`
+**文件**: `backend/src/config.rs`, `backend/src/subscription.rs`
 
 **修改内容**:
 ```rust
@@ -553,11 +553,11 @@ pub async fn save_config(config: serde_json::Value) -> Result<()> {
 
 #### Task 4.1: 定义错误枚举
 
-**文件**: `src-tauri/src/error.rs` (新建)
+**文件**: `backend/src/error.rs` (新建)
 
 **实现内容**:
 ```rust
-// src-tauri/src/error.rs
+// backend/src/error.rs
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -632,7 +632,7 @@ thiserror = "1.0"
 
 #### Task 5.1: 编写单元测试
 
-**文件**: `src-tauri/src/config_manager.rs`, `src-tauri/src/watchdog.rs`
+**文件**: `backend/src/config_manager.rs`, `backend/src/watchdog.rs`
 
 **测试内容**:
 ```rust
@@ -757,7 +757,7 @@ cd tauri-app
 npm install zustand
 
 # 后端
-cd src-tauri
+cd backend
 cargo add sysinfo fs2 lazy_static chrono thiserror tracing tracing-subscriber
 ```
 

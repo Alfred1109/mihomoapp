@@ -116,17 +116,17 @@ Phase 5: 编译验证              ███████████████
 | **净增代码** | 754 行 |
 
 ### 新增文件清单
-1. `src-tauri/src/events.rs` (50 行)
-2. `src-tauri/src/watchdog.rs` (171 行)
-3. `src-tauri/src/config_manager.rs` (169 行)
-4. `src-tauri/src/error.rs` (65 行)
+1. `backend/src/events.rs` (50 行)
+2. `backend/src/watchdog.rs` (171 行)
+3. `backend/src/config_manager.rs` (169 行)
+4. `backend/src/error.rs` (65 行)
 5. `src/store/appStore.ts` (60 行)
 6. 多个文档文件
 
 ### 修改文件清单
-1. `src-tauri/src/main.rs` (+100 行)
-2. `src-tauri/src/config.rs` (-20 行)
-3. `src-tauri/Cargo.toml` (+10 依赖)
+1. `backend/src/main.rs` (+100 行)
+2. `backend/src/config.rs` (-20 行)
+3. `backend/Cargo.toml` (+10 依赖)
 4. `src/App.tsx` (+20 行, -30 行)
 5. `src/components/ServiceControl.tsx` (+40 行)
 6. `tauri-app/package.json` (+1 依赖)

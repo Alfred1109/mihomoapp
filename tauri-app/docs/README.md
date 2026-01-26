@@ -85,7 +85,7 @@ tauri-app/
 │   │   └── ConnectionMonitor.tsx # 连接监控
 │   ├── App.tsx
 │   └── main.tsx
-├── src-tauri/                    # Tauri 后端
+├── backend/                    # Tauri 后端
 │   ├── src/
 │   │   ├── main.rs              # 主程序入口
 │   │   ├── config.rs            # 配置管理
@@ -153,16 +153,16 @@ npm run prepare:resources
 
 **Windows**:
 ```powershell
-# 下载并放置到 src-tauri/resources/
+# 下载并放置到 backend/resources/
 mihomo.exe    # mihomo 核心
 winsw.exe     # Windows 服务管理
 ```
 
 **Linux**:
 ```bash
-# 下载并放置到 src-tauri/resources/
+# 下载并放置到 backend/resources/
 mihomo        # mihomo 核心（需要执行权限）
-chmod +x src-tauri/resources/mihomo
+chmod +x backend/resources/mihomo
 ```
 
 ### Tauri 打包配置
@@ -213,8 +213,8 @@ npm run tauri:build
 ```
 
 **输出位置**:
-- **Windows**: `src-tauri/target/release/bundle/msi/` 或 `nsis/`
-- **Linux**: `src-tauri/target/release/bundle/deb/`
+- **Windows**: `backend/target/release/bundle/msi/` 或 `nsis/`
+- **Linux**: `backend/target/release/bundle/deb/`
 
 ### 安装后的文件位置
 
@@ -452,7 +452,7 @@ sudo setcap cap_net_admin,cap_net_bind_service=+ep /path/to/mihomo
 npm run prepare:resources
 
 # 手动检查
-ls src-tauri/resources/
+ls backend/resources/
 # 应该看到 mihomo 或 mihomo.exe
 ```
 
@@ -460,7 +460,7 @@ ls src-tauri/resources/
 
 ```bash
 # 清理并重新构建
-cd src-tauri
+cd backend
 cargo clean
 cd ..
 npm run tauri:build
@@ -486,10 +486,10 @@ sudo setcap cap_net_admin,cap_net_bind_service=+ep \
 
 ```bash
 # 检查文件权限
-ls -l src-tauri/resources/mihomo
+ls -l backend/resources/mihomo
 
 # 添加执行权限
-chmod +x src-tauri/resources/mihomo
+chmod +x backend/resources/mihomo
 ```
 
 #### 5. DNS 解析失败
