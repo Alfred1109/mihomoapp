@@ -154,15 +154,20 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             ],
             "default-nameserver": [
                 "223.5.5.5",
-                "119.29.29.29"
+                "119.29.29.29",
+                "114.114.114.114"
             ],
             "nameserver": [
                 "https://doh.pub/dns-query",
-                "https://dns.alidns.com/dns-query"
+                "https://dns.alidns.com/dns-query",
+                "223.5.5.5",
+                "119.29.29.29"
             ],
             "fallback": [
                 "https://1.1.1.1/dns-query",
-                "https://dns.google/dns-query"
+                "https://dns.google/dns-query",
+                "tls://1.1.1.1:853",
+                "8.8.8.8"
             ],
             "fallback-filter": {
                 "geoip": true,
@@ -173,12 +178,13 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             },
             "nameserver-policy": {
                 "geosite:cn,private,apple": [
-                    "https://doh.pub/dns-query",
-                    "https://dns.alidns.com/dns-query"
+                    "223.5.5.5",
+                    "119.29.29.29",
+                    "https://doh.pub/dns-query"
                 ],
                 "geosite:geolocation-!cn": [
-                    "https://1.1.1.1/dns-query",
-                    "https://dns.google/dns-query"
+                    "8.8.8.8",
+                    "https://1.1.1.1/dns-query"
                 ],
                 "geosite:category-ads-all": "rcode://success"
             }
