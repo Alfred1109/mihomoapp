@@ -131,23 +131,6 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     }
   };
 
-  const testGroupDelay = async (groupName: string) => {
-    try {
-      setLoading(true);
-      await invoke('test_group_delay', { groupName });
-      // 等待一小段时间确保Mihomo内部状态已更新
-      await new Promise(resolve => setTimeout(resolve, 500));
-      // Reload proxies to get updated delay info
-      await loadProxies();
-      showNotification(`延迟测试完成: ${groupName}`, 'success');
-    } catch (error) {
-      console.error(`Failed to test delay for group ${groupName}:`, error);
-      showNotification(`延迟测试失败: ${error}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleTestAllProxies = async () => {
     try {
       setLoading(true);

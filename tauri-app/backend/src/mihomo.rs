@@ -467,9 +467,37 @@ pub async fn test_group_delay(group_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// 批量测试所有代理组的延迟（会更新Mihomo内部状态）
+/// 测试单个代理节点的延迟
+pub async fn test_proxy_delay(proxy_name: &str, timeout: u32, test_url: &str) -> Result<u32> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://127.0.0.1:9090/proxies/{}/delay", proxy_name))
+        .query(&[
+            ("timeout", &timeout.to_string()),
+            ("url", test_url),
+        ])
+        .send()
+        .await
+        .context("Failed to test proxy delay")?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to test proxy delay: {}",
+            response.status()
+        ));
+    }
+
+    let result: serde_json::Value = response.json().await?;
+    let delay = result["delay"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("Invalid delay response"))?;
+    
+    Ok(delay as u32)
+}
+
+/// 批量测试所有代理节点的延迟（并发测试）
 pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
-    info!("🚀 开始批量测试所有代理组延迟");
+    info!("🚀 开始批量测试所有代理节点延迟");
 
     // 获取所有代理信息
     let proxies = get_proxies().await?;
@@ -477,76 +505,64 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("Invalid proxies response"))?;
 
-    // 找出所有代理组（Selector, URLTest, Fallback等）
+    // 找出所有真实的代理节点（排除代理组、Direct、Reject等）
     let group_types = ["Selector", "URLTest", "Fallback", "LoadBalance"];
-    let mut groups = Vec::new();
-    let mut total_nodes = 0;
+    let exclude_types = ["Direct", "Reject", "Compatible", "Pass"];
+    let mut proxy_nodes = Vec::new();
 
     for (name, proxy) in proxy_map {
         if let Some(proxy_type) = proxy["type"].as_str() {
-            if group_types.contains(&proxy_type) {
-                groups.push(name.clone());
-                // 统计该组中的节点数量
-                if let Some(all_nodes) = proxy["all"].as_array() {
-                    total_nodes += all_nodes.len();
-                }
+            if !group_types.contains(&proxy_type) && !exclude_types.contains(&proxy_type) {
+                proxy_nodes.push(name.clone());
             }
         }
     }
 
-    info!("📊 找到 {} 个代理组，共 {} 个节点", groups.len(), total_nodes);
+    let total_nodes = proxy_nodes.len();
+    info!("📊 找到 {} 个代理节点", total_nodes);
 
-    let mut failed_groups = Vec::new();
+    // 并发测试所有节点（使用合理的并发数避免过载）
+    let test_url = "http://www.gstatic.com/generate_204";
+    let timeout = 5000;
     let mut results = std::collections::HashMap::new();
+    let mut success_count = 0;
 
-    // 对每个组进行测速
-    for group_name in &groups {
-        info!("测试代理组: {}", group_name);
-        match test_group_delay(group_name).await {
-            Ok(_) => {
-                info!("  ✓ {} 测速完成", group_name);
+    // 使用 futures 并发测试，限制并发数为 10
+    use futures::stream::{self, StreamExt};
+    
+    let test_results: Vec<(String, Result<u32>)> = stream::iter(proxy_nodes.iter())
+        .map(|proxy_name| {
+            let name = proxy_name.clone();
+            async move {
+                let result = test_proxy_delay(&name, timeout, test_url).await;
+                (name, result)
+            }
+        })
+        .buffer_unordered(10) // 限制并发数为10
+        .collect()
+        .await;
+
+    // 处理测试结果
+    for (name, result) in test_results {
+        match result {
+            Ok(delay) => {
+                info!("  ✓ {} - {}ms", name, delay);
+                results.insert(name, Some(delay as i64));
+                success_count += 1;
             }
             Err(e) => {
-                failed_groups.push(group_name.clone());
-                info!("  ✗ {} 测速失败: {}", group_name, e);
+                info!("  ✗ {} - {}", name, e);
+                results.insert(name, None);
             }
         }
     }
 
-    // 获取测速后的代理信息，收集每个节点的延迟
-    let updated_proxies = get_proxies().await?;
-    let updated_proxy_map = updated_proxies["proxies"]
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Invalid proxies response"))?;
-
-    let mut tested_nodes = 0;
-    let mut success_nodes = 0;
-
-    for (name, proxy) in updated_proxy_map {
-        // 只统计真实的代理节点（不是代理组）
-        if let Some(proxy_type) = proxy["type"].as_str() {
-            if !group_types.contains(&proxy_type) && proxy_type != "Direct" && proxy_type != "Reject" {
-                tested_nodes += 1;
-                if let Some(history) = proxy["history"].as_array() {
-                    if !history.is_empty() {
-                        if let Some(delay) = history.last().and_then(|h| h["delay"].as_i64()) {
-                            results.insert(name.clone(), if delay > 0 { Some(delay) } else { None });
-                            if delay > 0 {
-                                success_nodes += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    info!("✅ 批量测速完成！成功: {}/{} 个节点", success_nodes, tested_nodes);
+    info!("✅ 批量测速完成！成功: {}/{} 个节点", success_count, total_nodes);
 
     Ok(serde_json::json!({
-        "total": tested_nodes,
-        "tested": tested_nodes,
-        "success": success_nodes,
+        "total": total_nodes,
+        "tested": total_nodes,
+        "success": success_count,
         "results": results
     }))
 }
