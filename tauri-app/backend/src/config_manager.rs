@@ -5,6 +5,7 @@ use anyhow::{Result, Context};
 use fs2::FileExt;
 use std::fs::File;
 use tracing::{info, warn};
+use yaml_rust::YamlLoader;
 
 pub struct ConfigManager {
     config_path: PathBuf,
@@ -35,11 +36,18 @@ impl ConfigManager {
         let content = std::fs::read_to_string(&self.config_path)
             .context("Failed to read config file")?;
         
-        let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
+        // Use yaml-rust which supports multi-document YAML
+        let yaml_docs = YamlLoader::load_from_str(&content)
             .context("Failed to parse YAML")?;
         
-        let json_value = serde_json::to_value(yaml_value)
-            .context("Failed to convert to JSON")?;
+        if yaml_docs.is_empty() {
+            return Err(anyhow::anyhow!("YAML file is empty"));
+        }
+        
+        // Only use the first document
+        let yaml_value = &yaml_docs[0];
+        let json_value = crate::config::yaml_to_json(yaml_value)
+            .context("Failed to convert YAML to JSON")?;
         
         file.unlock().ok();
         
