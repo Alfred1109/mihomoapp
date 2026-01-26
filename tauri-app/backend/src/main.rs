@@ -369,7 +369,7 @@ async fn get_current_ip() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn test_all_proxies(test_url: Option<String>, timeout: Option<u32>) -> Result<serde_json::Value, String> {
+async fn test_all_proxies(_test_url: Option<String>, _timeout: Option<u32>) -> Result<serde_json::Value, String> {
     // 使用 test_all_groups_delay 来测速，这样会更新 Mihomo 内部状态
     // test_url 和 timeout 参数暂时忽略，使用默认值
     mihomo::test_all_groups_delay().await

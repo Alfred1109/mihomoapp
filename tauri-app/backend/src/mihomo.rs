@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use tokio::process::Command as TokioCommand;
 use tokio::io::AsyncReadExt;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
