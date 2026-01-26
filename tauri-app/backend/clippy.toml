@@ -2,7 +2,7 @@
 
 # Deny common mistakes
 avoid-breaking-exported-api = true
-msrv = "1.70"
+msrv = "1.89"
 
 # Pedantic lints (optional, can be enabled gradually)
 # These are more strict and may require more refactoring

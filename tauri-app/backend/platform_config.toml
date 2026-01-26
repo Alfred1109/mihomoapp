@@ -1,0 +1,101 @@
+# Mihomo Manager 平台配置文件
+# 支持用户自定义路径和平台特定配置
+
+[windows]
+# Windows 平台配置
+mihomo_binary = "mihomo.exe"
+service_name = "MihomoService"
+service_wrapper = "winsw.exe"
+
+# 路径配置 (支持环境变量)
+config_dir = "${APPDATA}/mihomo"
+backup_dir = "${APPDATA}/mihomo/backups"
+log_dir = "${APPDATA}/mihomo/logs"
+
+# 进程管理
+kill_command = "taskkill"
+kill_args = ["/F", "/IM", "mihomo.exe"]
+
+# 服务管理
+service_install_command = "sc"
+service_start_command = "sc"
+service_stop_command = "sc"
+service_query_command = "sc"
+
+# 开机自启
+autostart_registry_key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+autostart_value_name = "MihomoManager"
+
+[linux]
+# Linux 平台配置
+mihomo_binary = "mihomo"
+service_name = "mihomo.service"
+
+# 路径配置 (支持环境变量和特殊变量)
+# ${HOME} - 用户主目录
+# ${SUDO_USER} - sudo 用户名
+# ${USER} - 当前用户名
+config_dir = "${HOME}/.config/mihomo"
+backup_dir = "${HOME}/.config/mihomo/backups"
+log_dir = "${HOME}/.config/mihomo/logs"
+
+# 系统路径搜索
+system_paths = [
+    "/usr/local/bin/mihomo",
+    "/usr/bin/mihomo",
+    "/opt/mihomo/mihomo"
+]
+
+# 进程管理
+kill_command = "pkill"
+kill_args = ["mihomo"]
+
+# 服务管理
+service_install_command = "systemctl"
+service_start_command = "systemctl"
+service_stop_command = "systemctl"
+service_query_command = "systemctl"
+service_unit_dir = "/etc/systemd/system"
+
+# 开机自启
+autostart_dir = "${HOME}/.config/autostart"
+autostart_file = "mihomo-manager.desktop"
+
+[macos]
+# macOS 平台配置
+mihomo_binary = "mihomo"
+service_name = "com.alfred.mihomo"
+
+# 路径配置
+config_dir = "${HOME}/.config/mihomo"
+backup_dir = "${HOME}/.config/mihomo/backups"
+log_dir = "${HOME}/.config/mihomo/logs"
+
+# 系统路径搜索
+system_paths = [
+    "/usr/local/bin/mihomo",
+    "/opt/homebrew/bin/mihomo"
+]
+
+# 进程管理
+kill_command = "pkill"
+kill_args = ["mihomo"]
+
+# 服务管理 (launchd)
+service_install_command = "launchctl"
+service_start_command = "launchctl"
+service_stop_command = "launchctl"
+service_query_command = "launchctl"
+service_plist_dir = "${HOME}/Library/LaunchAgents"
+
+# 开机自启
+autostart_dir = "${HOME}/Library/LaunchAgents"
+autostart_file = "com.alfred.mihomo.plist"
+
+[common]
+# 通用配置
+config_filename = "config.yaml"
+backup_prefix = "config.yaml.backup"
+max_backups = 10
+api_host = "127.0.0.1"
+api_port = 9090

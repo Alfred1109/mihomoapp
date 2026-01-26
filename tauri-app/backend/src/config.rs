@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -40,37 +40,63 @@ pub struct DnsConfig {
 
 pub async fn load_config() -> Result<serde_json::Value> {
     let config_path = get_config_path()?;
-    
+
     if !config_path.exists() {
         create_default_config(&config_path).await?;
     }
-    
+
     let manager = crate::config_manager::get_config_manager().await?;
     manager.read_config().await
 }
 
 pub async fn save_config(config: serde_json::Value) -> Result<()> {
     let config_path = get_config_path()?;
-    
+
     if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .context("Failed to create config directory")?;
+        fs::create_dir_all(parent).context("Failed to create config directory")?;
     }
-    
+
     let manager = crate::config_manager::get_config_manager().await?;
     manager.write_config(config).await
 }
 
+#[allow(dead_code)]
+pub async fn save_config_no_backup(config: serde_json::Value) -> Result<()> {
+    let config_path = get_config_path()?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create config directory")?;
+    }
+
+    let manager = crate::config_manager::get_config_manager().await?;
+    manager.write_config_with_options(config, false).await
+}
+
+/// 原子更新配置，防止竞态条件
+pub async fn update_config<F>(updater: F) -> Result<()>
+where
+    F: FnOnce(&mut serde_json::Value) -> Result<()>,
+{
+    let config_path = get_config_path()?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create config directory")?;
+    }
+
+    let manager = crate::config_manager::get_config_manager().await?;
+    manager.update_config(updater).await
+}
+
 pub async fn set_tun_mode(enable: bool) -> Result<()> {
     let mut config = load_config().await?;
-    
+
     // Ensure tun section exists
     if config.get("tun").is_none() {
         config["tun"] = serde_json::json!({});
     }
-    
+
     config["tun"]["enable"] = serde_json::json!(enable);
-    
+
     // Set default TUN settings if enabling
     if enable {
         if config["tun"]["stack"].is_null() {
@@ -89,7 +115,7 @@ pub async fn set_tun_mode(enable: bool) -> Result<()> {
             config["tun"]["mtu"] = serde_json::json!(1500);
         }
     }
-    
+
     save_config(config).await
 }
 
@@ -188,7 +214,7 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
             "MATCH,PROXY"
         ]
     });
-    
+
     save_config(default_config).await
 }
 
@@ -198,37 +224,8 @@ pub fn get_config_path() -> Result<PathBuf> {
 }
 
 fn get_mihomo_config_dir() -> Result<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        // Windows: 使用 AppData/Roaming 目录
-        Ok(dirs::config_dir()
-            .context("Failed to get config directory")?
-            .join("mihomo"))
-    }
-    
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Linux/Unix: 优先使用 SUDO_USER 环境变量获取实际用户的 home 目录
-        // 这样即使以 root 运行，也会使用实际用户的配置
-        let config_dir = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-            let user_home = PathBuf::from(format!("/home/{}", sudo_user));
-            user_home.join(".config").join("mihomo")
-        } else if let Ok(user) = std::env::var("USER") {
-            if user != "root" {
-                let user_home = PathBuf::from(format!("/home/{}", user));
-                user_home.join(".config").join("mihomo")
-            } else {
-                dirs::config_dir()
-                    .context("Failed to get config directory")?
-                    .join("mihomo")
-            }
-        } else {
-            dirs::config_dir()
-                .context("Failed to get config directory")?
-                .join("mihomo")
-        };
-        Ok(config_dir)
-    }
+    // 使用统一的平台配置系统
+    crate::platform_config::PlatformPaths::config_dir()
 }
 
 pub fn yaml_to_json(yaml: &Yaml) -> Result<serde_json::Value> {
