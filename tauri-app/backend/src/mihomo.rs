@@ -110,12 +110,34 @@ pub async fn start_mihomo() -> Result<u32> {
         )
     })?;
 
-    match TokioCommand::new(&mihomo_path)
-        .args(["-f", &config_path])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+    // 在 Windows 上创建隐藏控制台窗口的命令
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        #[allow(unused_imports)]
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        
+        let mut command = TokioCommand::new(&mihomo_path);
+        command
+            .args(["-f", &config_path])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW);
+        command
+    };
+    
+    // 在非 Windows 系统上正常启动
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut command = TokioCommand::new(&mihomo_path);
+        command
+            .args(["-f", &config_path])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    };
+    
+    match cmd.spawn() {
         Ok(mut cmd) => {
             // Give it a moment to start
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
