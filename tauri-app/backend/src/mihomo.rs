@@ -418,33 +418,6 @@ pub async fn get_traffic_stats() -> Result<serde_json::Value> {
     Ok(stats)
 }
 
-#[allow(dead_code)]
-pub async fn test_proxy_delay(proxy_name: &str, test_url: &str, timeout: u32) -> Result<u32> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!(
-            "http://127.0.0.1:9090/proxies/{}/delay",
-            proxy_name
-        ))
-        .query(&[
-            ("timeout", timeout.to_string()),
-            ("url", test_url.to_string()),
-        ])
-        .send()
-        .await
-        .context("Failed to test proxy delay")?;
-
-    let result: serde_json::Value = response
-        .json()
-        .await
-        .context("Failed to parse delay test result")?;
-
-    result["delay"]
-        .as_u64()
-        .map(|d| d as u32)
-        .ok_or_else(|| anyhow::anyhow!("Invalid delay response"))
-}
-
 pub async fn test_group_delay(group_name: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let response = client
@@ -530,12 +503,11 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
     // 使用 futures 并发测试，限制并发数为 10
     use futures::stream::{self, StreamExt};
     
-    let test_results: Vec<(String, Result<u32>)> = stream::iter(proxy_nodes.iter())
-        .map(|proxy_name| {
-            let name = proxy_name.clone();
+    let test_results: Vec<(String, Result<u32>)> = stream::iter(proxy_nodes.iter().cloned())
+        .map(|proxy_name: String| {
             async move {
-                let result = test_proxy_delay(&name, timeout, test_url).await;
-                (name, result)
+                let result = test_proxy_delay(&proxy_name, timeout, test_url).await;
+                (proxy_name, result)
             }
         })
         .buffer_unordered(10) // 限制并发数为10

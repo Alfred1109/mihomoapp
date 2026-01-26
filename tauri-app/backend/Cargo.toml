@@ -38,6 +38,7 @@ lazy_static = "1.5.0"
 serde_yaml = "0.9.34"
 thiserror = "2.0.18"
 toml = "0.8"
+futures = "0.3"
 
 [features]
 default = ["custom-protocol"]
