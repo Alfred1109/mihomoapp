@@ -60,6 +60,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const [loading, setLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const [proxyHistory, setProxyHistory] = useState<Array<{ groupName: string; nodeName: string; time: string }>>([]);
 
   const extractProxyGroups = (response: any) => {
     // Extract proxy groups, PROXY组优先
@@ -169,6 +170,21 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     try {
       setLoading(true);
       await invoke('switch_proxy', { groupName, proxyName });
+      
+      // 记录切换历史，保留最近3条
+      const newHistory = [
+        { groupName, nodeName: proxyName, time: new Date().toISOString() },
+        ...proxyHistory.filter(h => !(h.groupName === groupName && h.nodeName === proxyName))
+      ].slice(0, 3);
+      setProxyHistory(newHistory);
+      
+      // 保存到localStorage
+      try {
+        localStorage.setItem('proxyHistory', JSON.stringify(newHistory));
+      } catch (e) {
+        console.error('Failed to save proxy history:', e);
+      }
+      
       showNotification('代理切换成功', 'success');
       await loadProxies(); // Refresh data
     } catch (error) {
@@ -237,6 +253,16 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
 
   useEffect(() => {
     loadProxies();
+    
+    // 从localStorage加载历史记录
+    try {
+      const saved = localStorage.getItem('proxyHistory');
+      if (saved) {
+        setProxyHistory(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.error('Failed to load proxy history:', e);
+    }
     
     if (isRunning) {
       // 延长刷新间隔到30秒，减少不必要的API调用
@@ -451,65 +477,55 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       )}
 
       {/* Connection History */}
-      {selectedGroup && (() => {
-        const group = groups.find(g => g.name === selectedGroup);
-        if (!group) return null;
-
-        // 收集该组所有节点的测速历史
-        const nodeHistories: Array<{ name: string; delay: number; time: string }> = [];
+      {selectedGroup && proxyHistory.length > 0 && (() => {
+        // 只显示当前选中组的历史记录
+        const groupHistory = proxyHistory.filter(h => h.groupName === selectedGroup).slice(0, 3);
         
-        group.all.forEach((nodeName) => {
-          const node = proxies[nodeName];
-          if (node && node.history && Array.isArray(node.history) && node.history.length > 0) {
-            // 获取该节点最新的测速记录（Mihomo的history是倒序的，最新在索引0）
-            const latestHistory = node.history[0];
-            if (latestHistory && latestHistory.time) {
-              nodeHistories.push({
-                name: nodeName,
-                delay: latestHistory.delay || 0,
-                time: latestHistory.time
-              });
-            }
-          }
-        });
-
-        // 按时间排序，最新的在前（history已经是倒序，但不同节点间需要排序）
-        nodeHistories.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-
-        if (nodeHistories.length === 0) return null;
+        if (groupHistory.length === 0) return null;
 
         return (
           <Card sx={{ mt: 3 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Latest Speed Test Results for {selectedGroup}
+                历史使用节点 - {selectedGroup}
               </Typography>
               
               <TableContainer component={Paper}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Node</TableCell>
-                      <TableCell>Delay</TableCell>
-                      <TableCell>Time</TableCell>
+                      <TableCell>节点名称</TableCell>
+                      <TableCell>当前延迟</TableCell>
+                      <TableCell>切换时间</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {nodeHistories.slice(0, 10).map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={formatDelay(item.delay)}
-                            size="small"
-                            color={getDelayColor(item.delay)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {new Date(item.time).toLocaleTimeString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {groupHistory.map((item, index) => {
+                      const node = proxies[item.nodeName] as any;
+                      const history = node?.history;
+                      const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
+                      
+                      return (
+                        <TableRow key={index}>
+                          <TableCell>{item.nodeName}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={formatDelay(nodeDelay)}
+                              size="small"
+                              color={getDelayColor(nodeDelay)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {new Date(item.time).toLocaleString('zh-CN', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>
