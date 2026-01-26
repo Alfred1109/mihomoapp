@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs;
 use uuid::Uuid;
+use tracing::{info, warn, debug};
 
 fn build_subscription_request(
     client: &reqwest::Client,
@@ -126,8 +127,8 @@ pub async fn update_subscription(id: &str) -> Result<()> {
                         return Err(err);
                     }
                     
-                    println!("✓ 订阅更新成功，配置文件已生成");
-                    println!("提示: 配置已更新。如果Mihomo服务正在运行，请重启服务以应用更改。");
+                    info!("✓ 订阅更新成功，配置文件已生成");
+                    info!("提示: 配置已更新。如果Mihomo服务正在运行，请重启服务以应用更改。");
                 }
             }
             Err(e) => {
@@ -185,10 +186,10 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
     
     // Backup current config before generating new one
     if let Err(e) = crate::backup::backup_config().await {
-        println!("⚠ 配置备份失败: {}", e);
+        warn!("⚠ 配置备份失败: {}", e);
         // 不阻止配置生成，继续执行
     } else {
-        println!("✓ 配置已备份");
+        info!("✓ 配置已备份");
     }
     
     // Generate config with proxies
@@ -228,24 +229,24 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
     match crate::validator::validate_config(&config).await {
         Ok(result) => {
             if !result.valid {
-                println!("⚠ 配置验证失败:");
+                warn!("⚠ 配置验证失败:");
                 for error in &result.errors {
-                    println!("  ✗ {}", error);
+                    warn!("  ✗ {}", error);
                 }
                 return Err(anyhow::anyhow!("配置验证失败: {}", result.errors.join(", ")));
             }
             
             if !result.warnings.is_empty() {
-                println!("⚠ 配置警告:");
+                warn!("⚠ 配置警告:");
                 for warning in &result.warnings {
-                    println!("  ! {}", warning);
+                    warn!("  ! {}", warning);
                 }
             }
             
-            println!("✓ 配置验证通过");
+            info!("✓ 配置验证通过");
         }
         Err(e) => {
-            println!("⚠ 配置验证出错: {}", e);
+            warn!("⚠ 配置验证出错: {}", e);
             // 验证出错不阻止保存，继续执行
         }
     }
@@ -286,7 +287,7 @@ async fn fetch_and_parse_subscription(subscription: &Subscription) -> Result<Vec
     
     // 如果不使用代理，则完全禁用所有代理
     if !subscription.use_proxy {
-        println!("订阅 '{}' 配置为直连模式，完全绕过系统代理", subscription.name);
+        info!("订阅 '{}' 配置为直连模式，完全绕过系统代理", subscription.name);
         // 禁用系统代理和环境变量代理
         client_builder = client_builder.no_proxy();
         
@@ -296,7 +297,7 @@ async fn fetch_and_parse_subscription(subscription: &Subscription) -> Result<Vec
             client_builder = client_builder.local_address(addr);
         }
     } else {
-        println!("订阅 '{}' 配置为使用代理模式", subscription.name);
+        info!("订阅 '{}' 配置为使用代理模式", subscription.name);
     }
     
     let client = client_builder.build()?;
@@ -323,34 +324,34 @@ async fn fetch_and_parse_subscription(subscription: &Subscription) -> Result<Vec
 }
 
 fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
-    println!("订阅原始内容长度: {} 字节", content.len());
-    println!("订阅内容前100字符: {}", &content[..content.len().min(100)]);
+    debug!("订阅原始内容长度: {} 字节", content.len());
+    debug!("订阅内容前100字符: {}", &content[..content.len().min(100)]);
     
     // Try to decode as base64 first
     let decoded_content = if let Ok(decoded) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, content.trim()) {
         match String::from_utf8(decoded) {
             Ok(s) => {
-                println!("Base64解码成功，解码后长度: {} 字节", s.len());
+                debug!("Base64解码成功，解码后长度: {} 字节", s.len());
                 s
             }
             Err(_) => {
-                println!("Base64解码后无法转换为UTF-8，使用原始内容");
+                debug!("Base64解码后无法转换为UTF-8，使用原始内容");
                 content.to_string()
             }
         }
     } else {
-        println!("不是Base64编码，使用原始内容");
+        debug!("不是Base64编码，使用原始内容");
         content.to_string()
     };
     
     // Try parsing as YAML first
-    println!("尝试解析为YAML...");
+    debug!("尝试解析为YAML...");
     if let Ok(docs) = yaml_rust::YamlLoader::load_from_str(&decoded_content) {
-        println!("YAML解析成功，文档数量: {}", docs.len());
+        debug!("YAML解析成功，文档数量: {}", docs.len());
         if let Some(doc) = docs.get(0) {
             // Try to find proxies in the YAML structure
             if let Some(proxies) = doc["proxies"].as_vec() {
-                println!("找到proxies字段，代理数量: {}", proxies.len());
+                debug!("找到proxies字段，代理数量: {}", proxies.len());
                 let mut result = Vec::new();
                 for (i, proxy) in proxies.iter().enumerate() {
                     match crate::config::yaml_to_json(proxy) {
@@ -358,32 +359,32 @@ fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
                             result.push(json_proxy);
                         }
                         Err(e) => {
-                            println!("代理 {} 转换失败: {}", i, e);
+                            debug!("代理 {} 转换失败: {}", i, e);
                         }
                     }
                 }
                 if !result.is_empty() {
-                    println!("成功解析 {} 个代理节点", result.len());
+                    info!("成功解析 {} 个代理节点", result.len());
                     return Ok(result);
                 } else {
-                    println!("proxies字段存在但没有有效节点");
+                    debug!("proxies字段存在但没有有效节点");
                 }
             } else {
-                println!("YAML中未找到proxies字段");
+                debug!("YAML中未找到proxies字段");
             }
         }
     } else {
-        println!("YAML解析失败");
+        debug!("YAML解析失败");
     }
     
     // If YAML parsing fails or no proxies found, try parsing individual proxy URLs
-    println!("尝试解析为代理URL列表...");
+    debug!("尝试解析为代理URL列表...");
     let lines: Vec<&str> = decoded_content.lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .collect();
     
-    println!("找到 {} 行非空内容", lines.len());
+    debug!("找到 {} 行非空内容", lines.len());
     
     let mut proxies = Vec::new();
     let mut errors = Vec::new();
@@ -411,7 +412,7 @@ fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
         return Err(anyhow::anyhow!(error_msg));
     }
     
-    println!("成功解析 {} 个代理URL", proxies.len());
+    info!("成功解析 {} 个代理URL", proxies.len());
     Ok(proxies)
 }
 

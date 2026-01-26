@@ -180,6 +180,10 @@ async fn stop_mihomo_service(
     app: tauri::AppHandle,
     watchdog: State<'_, std::sync::Arc<watchdog::ProcessWatchdog>>,
 ) -> Result<String, String> {
+    // 先临时禁用自动重启，防止watchdog在停止过程中尝试重启
+    let original_auto_restart = watchdog.get_auto_restart().await;
+    watchdog.set_auto_restart(false).await;
+    
     match mihomo::stop_mihomo().await {
         Ok(_) => {
             {
@@ -192,6 +196,12 @@ async fn stop_mihomo_service(
             // 清除 watchdog 跟踪
             watchdog.clear_process().await;
             
+            // 等待一小段时间确保服务完全停止
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // 恢复自动重启设置（但服务已停止，不会触发重启）
+            watchdog.set_auto_restart(original_auto_restart).await;
+            
             events::emit_mihomo_status(
                 &app,
                 events::MihomoStatusEvent {
@@ -203,7 +213,11 @@ async fn stop_mihomo_service(
             
             Ok("Mihomo service stopped successfully".to_string())
         }
-        Err(e) => Err(format!("Failed to stop mihomo: {}", e)),
+        Err(e) => {
+            // 如果停止失败，恢复自动重启设置
+            watchdog.set_auto_restart(original_auto_restart).await;
+            Err(format!("Failed to stop mihomo: {}", e))
+        }
     }
 }
 
@@ -342,10 +356,10 @@ async fn get_current_ip() -> Result<serde_json::Value, String> {
     ];
     
     for service in services {
-        println!("尝试从 {} 获取IP信息", service);
+        tracing::debug!("尝试从 {} 获取IP信息", service);
         if let Ok(response) = client.get(service).send().await {
             if let Ok(data) = response.json::<serde_json::Value>().await {
-                println!("成功获取IP信息: {:?}", data);
+                tracing::info!("成功获取IP信息: {:?}", data);
                 return Ok(data);
             }
         }
@@ -356,7 +370,9 @@ async fn get_current_ip() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn test_all_proxies(test_url: Option<String>, timeout: Option<u32>) -> Result<serde_json::Value, String> {
-    mihomo::test_all_proxies_delay(test_url, timeout).await
+    // 使用 test_all_groups_delay 来测速，这样会更新 Mihomo 内部状态
+    // test_url 和 timeout 参数暂时忽略，使用默认值
+    mihomo::test_all_groups_delay().await
         .map_err(|e| format!("Failed to test all proxies: {}", e))
 }
 
@@ -377,6 +393,19 @@ async fn restore_config_backup(backup_filename: String) -> Result<String, String
     backup::restore_config(&backup_filename).await
         .map_err(|e| format!("Failed to restore backup: {}", e))
         .map(|_| "配置已从备份恢复，请重启服务以应用更改".to_string())
+}
+
+#[tauri::command]
+async fn delete_config_backup(backup_filename: String) -> Result<String, String> {
+    backup::delete_backup(&backup_filename).await
+        .map_err(|e| format!("Failed to delete backup: {}", e))
+        .map(|_| "备份已删除".to_string())
+}
+
+#[tauri::command]
+async fn rename_config_backup(old_filename: String, new_label: String) -> Result<String, String> {
+    backup::rename_backup(&old_filename, &new_label).await
+        .map_err(|e| format!("Failed to rename backup: {}", e))
 }
 
 #[tauri::command]
@@ -1293,6 +1322,8 @@ fn main() {
             validate_config,
             list_config_backups,
             restore_config_backup,
+            delete_config_backup,
+            rename_config_backup,
             get_current_ip,
             check_mihomo_binary,
             check_admin_privileges,

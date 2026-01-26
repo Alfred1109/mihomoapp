@@ -23,6 +23,7 @@ import {
   Refresh,
   History,
   CheckCircle,
+  Edit,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -35,6 +36,9 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
   const [loading, setLoading] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState(false);
+  const [editDialog, setEditDialog] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
 
   useEffect(() => {
     loadBackups();
@@ -61,6 +65,41 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
       setSelectedBackup(null);
     } catch (error) {
       showNotification(`恢复备份失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (backupFilename: string) => {
+    setLoading(true);
+    try {
+      const result = await invoke<string>('delete_config_backup', { backupFilename });
+      showNotification(result, 'success');
+      setDeleteDialog(false);
+      setSelectedBackup(null);
+      await loadBackups();
+    } catch (error) {
+      showNotification(`删除备份失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRename = async (oldFilename: string, label: string) => {
+    if (!label.trim()) {
+      showNotification('标签不能为空', 'warning');
+      return;
+    }
+    setLoading(true);
+    try {
+      await invoke<string>('rename_config_backup', { oldFilename, newLabel: label });
+      showNotification('备份已重命名', 'success');
+      setEditDialog(false);
+      setSelectedBackup(null);
+      setNewLabel('');
+      await loadBackups();
+    } catch (error) {
+      showNotification(`重命名备份失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -191,17 +230,44 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
                       }
                     />
                     <ListItemSecondaryAction>
-                      <IconButton
-                        edge="end"
-                        onClick={() => {
-                          setSelectedBackup(backup);
-                          setConfirmDialog(true);
-                        }}
-                        disabled={loading}
-                        title="恢复此备份"
-                      >
-                        <Restore />
-                      </IconButton>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <IconButton
+                          onClick={() => {
+                            setSelectedBackup(backup);
+                            setNewLabel('');
+                            setEditDialog(true);
+                          }}
+                          disabled={loading}
+                          title="编辑备份标签"
+                          size="small"
+                        >
+                          <Edit fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          onClick={() => {
+                            setSelectedBackup(backup);
+                            setConfirmDialog(true);
+                          }}
+                          disabled={loading}
+                          title="恢复此备份"
+                          size="small"
+                          color="primary"
+                        >
+                          <Restore fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          onClick={() => {
+                            setSelectedBackup(backup);
+                            setDeleteDialog(true);
+                          }}
+                          disabled={loading}
+                          title="删除此备份"
+                          size="small"
+                          color="error"
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Box>
                     </ListItemSecondaryAction>
                   </ListItem>
                 );
@@ -211,7 +277,7 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
         </CardContent>
       </Card>
 
-      {/* 确认对话框 */}
+      {/* 恢复确认对话框 */}
       <Dialog open={confirmDialog} onClose={() => setConfirmDialog(false)}>
         <DialogTitle>确认恢复备份</DialogTitle>
         <DialogContent>
@@ -243,6 +309,97 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
             disabled={loading}
           >
             确认恢复
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 删除确认对话框 */}
+      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)}>
+        <DialogTitle>确认删除备份</DialogTitle>
+        <DialogContent>
+          <Typography>
+            确定要删除以下备份吗？此操作无法撤销！
+          </Typography>
+          {selectedBackup && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="body2">
+                {formatBackupName(selectedBackup).date} {formatBackupName(selectedBackup).time}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {selectedBackup}
+              </Typography>
+            </Box>
+          )}
+          <Alert severity="error" sx={{ mt: 2 }}>
+            删除后将无法恢复此备份！
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialog(false)}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => selectedBackup && handleDelete(selectedBackup)}
+            disabled={loading}
+          >
+            确认删除
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 编辑标签对话框 */}
+      <Dialog open={editDialog} onClose={() => setEditDialog(false)}>
+        <DialogTitle>编辑备份标签</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            为备份添加自定义标签，方便识别：
+          </Typography>
+          {selectedBackup && (
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="body2">
+                {formatBackupName(selectedBackup).date} {formatBackupName(selectedBackup).time}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {selectedBackup}
+              </Typography>
+            </Box>
+          )}
+          <Box
+            component="input"
+            type="text"
+            value={newLabel}
+            onChange={(e: any) => setNewLabel(e.target.value)}
+            placeholder="输入标签，例如：更新前备份"
+            sx={{
+              width: '100%',
+              p: 1.5,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              fontSize: '0.875rem',
+              fontFamily: 'inherit',
+              '&:focus': {
+                outline: 'none',
+                borderColor: 'primary.main',
+              },
+            }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            标签只能包含字母、数字、空格、下划线和连字符
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialog(false)}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => selectedBackup && handleRename(selectedBackup, newLabel)}
+            disabled={loading || !newLabel.trim()}
+          >
+            保存
           </Button>
         </DialogActions>
       </Dialog>

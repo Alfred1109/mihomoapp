@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use tokio::process::Command as TokioCommand;
 use tokio::io::AsyncReadExt;
+use tracing::{info, debug};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +45,13 @@ pub async fn start_mihomo() -> Result<u32> {
     if !std::path::Path::new(&config_path).exists() {
         crate::config::save_config(create_default_config()).await
             .context("Failed to create default config")?;
+    }
+    
+    // 检查是否已有mihomo进程在运行，如果有则先清理
+    if is_mihomo_running().await {
+        info!("Detected existing mihomo process, stopping it first...");
+        let _ = stop_mihomo().await; // 忽略错误，继续启动
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
     
     // 查找 mihomo 可执行文件
@@ -238,10 +246,30 @@ pub fn create_default_config() -> serde_json::Value {
 
 pub async fn stop_mihomo() -> Result<()> {
     // Try to gracefully stop mihomo via API first
-    if let Err(_) = send_shutdown_command().await {
-        // If API shutdown fails, force kill the process
+    if let Ok(_) = send_shutdown_command().await {
+        info!("Sent shutdown command to mihomo, waiting for graceful shutdown...");
+        
+        // 等待最多5秒让进程优雅关闭
+        for i in 0..10 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if !is_mihomo_running().await {
+                info!("Mihomo stopped gracefully");
+                return Ok(());
+            }
+            if i == 4 {
+                info!("Mihomo still running after 2.5s, continuing to wait...");
+            }
+        }
+        
+        // 如果5秒后还在运行，强制杀进程
+        warn!("Mihomo did not stop gracefully, force killing...");
+        kill_mihomo_process().await?;
+    } else {
+        // API关闭失败，直接强制杀进程
+        info!("API shutdown failed, force killing mihomo process...");
         kill_mihomo_process().await?;
     }
+    
     Ok(())
 }
 
@@ -273,6 +301,24 @@ async fn kill_mihomo_process() -> Result<()> {
     }
     
     Ok(())
+}
+
+/// 检查mihomo是否正在运行
+async fn is_mihomo_running() -> bool {
+    // 尝试通过API检查
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build();
+    
+    if let Ok(client) = client {
+        if let Ok(response) = client.get("http://127.0.0.1:9090/version").send().await {
+            if response.status().is_success() {
+                return true;
+            }
+        }
+    }
+    
+    false
 }
 
 pub async fn get_proxies() -> Result<serde_json::Value> {
@@ -364,13 +410,64 @@ pub async fn test_group_delay(group_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// 批量测试所有代理组的延迟（会更新Mihomo内部状态）
+pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
+    info!("🚀 开始批量测试所有代理组延迟");
+    
+    // 获取所有代理信息
+    let proxies = get_proxies().await?;
+    let proxy_map = proxies["proxies"].as_object()
+        .ok_or_else(|| anyhow::anyhow!("Invalid proxies response"))?;
+    
+    // 找出所有代理组（Selector, URLTest, Fallback等）
+    let group_types = vec!["Selector", "URLTest", "Fallback", "LoadBalance"];
+    let mut groups = Vec::new();
+    
+    for (name, proxy) in proxy_map {
+        if let Some(proxy_type) = proxy["type"].as_str() {
+            if group_types.contains(&proxy_type) {
+                groups.push(name.clone());
+            }
+        }
+    }
+    
+    info!("📊 找到 {} 个代理组", groups.len());
+    
+    let mut success_count = 0;
+    let mut failed_groups = Vec::new();
+    
+    // 对每个组进行测速
+    for group_name in &groups {
+        info!("测试代理组: {}", group_name);
+        match test_group_delay(group_name).await {
+            Ok(_) => {
+                success_count += 1;
+                info!("  ✓ {} 测速完成", group_name);
+            }
+            Err(e) => {
+                failed_groups.push(group_name.clone());
+                info!("  ✗ {} 测速失败: {}", group_name, e);
+            }
+        }
+    }
+    
+    info!("✅ 批量测速完成！成功: {}/{}", success_count, groups.len());
+    
+    Ok(serde_json::json!({
+        "total": groups.len(),
+        "success": success_count,
+        "failed": failed_groups.len(),
+        "failed_groups": failed_groups
+    }))
+}
+
 /// 批量测试所有节点延迟（优化版）
 pub async fn test_all_proxies_delay(test_url: Option<String>, timeout: Option<u32>) -> Result<serde_json::Value> {
     // 使用更快的测速URL - CP.cloudflare.com是专门用于连接测试的
     let test_url = test_url.unwrap_or_else(|| "http://cp.cloudflare.com".to_string());
     let timeout = timeout.unwrap_or(5000);
     
-    println!("🚀 开始批量测速，测试URL: {}, 超时: {}ms", test_url, timeout);
+    info!("🚀 开始批量测速，测试URL: {}, 超时: {}ms", test_url, timeout);
     
     // 创建优化的HTTP客户端（连接池复用）
     let client = reqwest::Client::builder()
@@ -399,7 +496,7 @@ pub async fn test_all_proxies_delay(test_url: Option<String>, timeout: Option<u3
         }
     }
     
-    println!("📊 找到 {} 个节点，开始并发测速...", proxy_names.len());
+    info!("📊 找到 {} 个节点，开始并发测速...", proxy_names.len());
     
     // 使用信号量限制并发数
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(20));
@@ -418,11 +515,11 @@ pub async fn test_all_proxies_delay(test_url: Option<String>, timeout: Option<u3
             
             match test_proxy_delay_optimized(&client_clone, &name_clone, &url_clone, timeout).await {
                 Ok(delay) => {
-                    println!("  ✓ {} - {}ms", name_clone, delay);
+                    debug!("  ✓ {} - {}ms", name_clone, delay);
                     (name_clone, Some(delay))
                 }
                 Err(_) => {
-                    println!("  ✗ {} - 超时", name_clone);
+                    debug!("  ✗ {} - 超时", name_clone);
                     (name_clone, None)
                 }
             }
@@ -440,7 +537,7 @@ pub async fn test_all_proxies_delay(test_url: Option<String>, timeout: Option<u3
     }
     
     let success_count = results.iter().filter(|(_, d)| d.is_some()).count();
-    println!("✅ 批量测速完成！成功: {}/{}", success_count, proxy_names.len());
+    info!("✅ 批量测速完成！成功: {}/{}", success_count, proxy_names.len());
     
     Ok(serde_json::json!({
         "total": proxy_names.len(),

@@ -52,6 +52,9 @@ pub async fn restore_config(backup_filename: &str) -> Result<()> {
     fs::copy(&backup_path, &config_path)
         .context("Failed to restore config from backup")?;
     
+    // 清理旧备份，包括 before_restore 临时备份
+    cleanup_old_backups(&backup_dir, 5)?;
+    
     println!("✓ 配置已从备份恢复: {}", backup_filename);
     Ok(())
 }
@@ -146,6 +149,71 @@ fn get_mihomo_config_dir() -> Result<PathBuf> {
         };
         Ok(config_dir)
     }
+}
+
+/// 删除指定的备份文件
+pub async fn delete_backup(backup_filename: &str) -> Result<()> {
+    let backup_dir = get_backup_dir()?;
+    let backup_path = backup_dir.join(backup_filename);
+    
+    if !backup_path.exists() {
+        return Err(anyhow::anyhow!("备份文件不存在: {}", backup_filename));
+    }
+    
+    // 检查是否是备份文件（防止误删其他文件）
+    if !backup_filename.starts_with("config.yaml.backup.") {
+        return Err(anyhow::anyhow!("无效的备份文件名"));
+    }
+    
+    fs::remove_file(&backup_path)
+        .context("Failed to delete backup file")?;
+    
+    println!("✓ 备份已删除: {}", backup_filename);
+    Ok(())
+}
+
+/// 重命名备份文件（添加自定义标签）
+pub async fn rename_backup(old_filename: &str, new_label: &str) -> Result<String> {
+    let backup_dir = get_backup_dir()?;
+    let old_path = backup_dir.join(old_filename);
+    
+    if !old_path.exists() {
+        return Err(anyhow::anyhow!("备份文件不存在: {}", old_filename));
+    }
+    
+    // 检查是否是备份文件
+    if !old_filename.starts_with("config.yaml.backup.") {
+        return Err(anyhow::anyhow!("无效的备份文件名"));
+    }
+    
+    // 提取时间戳部分
+    let timestamp = old_filename.strip_prefix("config.yaml.backup.")
+        .ok_or_else(|| anyhow::anyhow!("无法解析备份文件名"))?;
+    
+    // 生成新文件名：config.yaml.backup.timestamp.label
+    let safe_label = new_label.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || c.is_whitespace())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    
+    if safe_label.is_empty() {
+        return Err(anyhow::anyhow!("标签不能为空"));
+    }
+    
+    let new_filename = format!("config.yaml.backup.{}.{}", timestamp, safe_label);
+    let new_path = backup_dir.join(&new_filename);
+    
+    // 检查新文件名是否已存在
+    if new_path.exists() {
+        return Err(anyhow::anyhow!("该标签的备份已存在"));
+    }
+    
+    fs::rename(&old_path, &new_path)
+        .context("Failed to rename backup file")?;
+    
+    println!("✓ 备份已重命名: {} -> {}", old_filename, new_filename);
+    Ok(new_filename)
 }
 
 fn get_backup_dir() -> Result<PathBuf> {

@@ -10,6 +10,7 @@ pub struct ProcessWatchdog {
     app_handle: tauri::AppHandle,
     monitoring: Arc<RwLock<bool>>,
     last_known_status: Arc<RwLock<bool>>,
+    manual_stop: Arc<RwLock<bool>>,  // 标记是否为手动停止
 }
 
 /// 检查 mihomo API 是否可访问（健康检查）
@@ -36,19 +37,26 @@ impl ProcessWatchdog {
             app_handle,
             monitoring: Arc::new(RwLock::new(false)),
             last_known_status: Arc::new(RwLock::new(false)),
+            manual_stop: Arc::new(RwLock::new(false)),
         }
     }
     
     pub async fn set_process(&self, pid: u32) {
         let mut process_id = self.process_id.write().await;
         *process_id = Some(pid);
+        // 清除手动停止标志（因为服务正在启动）
+        let mut manual_stop = self.manual_stop.write().await;
+        *manual_stop = false;
         info!("Watchdog tracking process: {}", pid);
     }
     
     pub async fn clear_process(&self) {
         let mut process_id = self.process_id.write().await;
         *process_id = None;
-        info!("Watchdog cleared process tracking");
+        // 设置手动停止标志
+        let mut manual_stop = self.manual_stop.write().await;
+        *manual_stop = true;
+        info!("Watchdog cleared process tracking (manual stop)");
     }
     
     pub async fn set_auto_restart(&self, enabled: bool) {
@@ -139,7 +147,13 @@ impl ProcessWatchdog {
                             *restart_lock
                         };
                         
-                        if should_restart {
+                        // 检查是否为手动停止
+                        let is_manual_stop = {
+                            let manual_stop_lock = self.manual_stop.read().await;
+                            *manual_stop_lock
+                        };
+                        
+                        if should_restart && !is_manual_stop {
                             let now = std::time::Instant::now();
                             if now.duration_since(last_restart_time) > restart_window {
                                 restart_count = 0;
