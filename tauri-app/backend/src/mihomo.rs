@@ -194,7 +194,7 @@ pub fn create_default_config() -> serde_json::Value {
     serde_json::json!({
         "port": 7890,
         "socks-port": 7891,
-        "mixed-port": 7890,
+        "mixed-port": 7892,
         "allow-lan": false,
         "mode": "rule",
         "log-level": "info",

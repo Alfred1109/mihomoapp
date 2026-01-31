@@ -230,7 +230,7 @@ async fn create_default_config(_config_path: &PathBuf) -> Result<()> {
         "config_version": CONFIG_VERSION,
         "port": 7890,
         "socks-port": 7891,
-        "mixed-port": 7890,
+        "mixed-port": 7892,
         "allow-lan": false,
         "mode": "rule",
         "log-level": "info",
