@@ -51,6 +51,8 @@ server/config/
 *.yaml
 *.yml
 !config.example.yaml
+!docs/**/*.yaml
+!docs/**/*.yml
 
 # Build artifacts
 *.deb

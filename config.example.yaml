@@ -1,0 +1,212 @@
+# 🚀 Mihomo Manager 配置文件示例
+# 这是一个去敏化的配置模板，包含了最新的DNS优化和性能配置
+# 复制此文件为 config.yaml 并修改为你的实际配置
+
+# ⚡ 基础网络配置
+port: 7890                          # HTTP 代理端口
+socks-port: 7891                     # SOCKS5 代理端口
+mixed-port: 7890                     # HTTP+SOCKS5 混合端口
+allow-lan: false                     # 是否允许局域网连接
+mode: rule                           # 工作模式：rule/global/direct
+log-level: info                      # 日志级别：silent/error/warning/info/debug
+external-controller: 127.0.0.1:9090  # RESTful API 监听地址
+
+# 🎯 性能优化配置
+unified-delay: true                  # 统一延迟测试
+tcp-concurrent: true                 # TCP 并发连接
+keep-alive-interval: 30              # Keep-Alive 间隔（秒）
+find-process-mode: strict            # 进程匹配模式
+global-client-fingerprint: chrome   # 全局客户端指纹
+
+# 🧠 DNS 智能配置（三层架构）
+dns:
+  enable: true                       # 启用内置 DNS 服务器
+  ipv6: false                        # 禁用 IPv6（提升解析速度）
+  listen: 0.0.0.0:53                 # DNS 监听地址
+  enhanced-mode: fake-ip             # 增强模式：fake-ip/redir-host
+  fake-ip-range: 198.18.0.1/16       # Fake-IP 地址池
+  prefer-h3: true                    # 优先使用 HTTP/3（DoH 加速）
+
+  # 🚫 Fake-IP 排除列表（需要真实IP的服务）
+  fake-ip-filter:
+    - "*.lan"                        # 局域网域名
+    - "*.local"                      # 本地域名
+    - "localhost.ptlogin2.qq.com"    # QQ登录域名
+    - "+.srv.nintendo.net"           # 任天堂服务
+    - "+.stun.playstation.net"       # PlayStation网络
+    - "xbox.*.microsoft.com"         # Xbox服务
+    - "+.xboxlive.com"               # Xbox Live
+    - "+.battlenet.com.cn"           # 暴雪国服
+    - "+.battlenet.com"              # 暴雪国际服
+    - "+.blzstatic.cn"               # 暴雪静态资源
+    - "+.battle.net"                 # Battle.net
+    - "+.kuwo.cn"                    # 酷我音乐
+    - "+.msftconnecttest.com"        # 微软连接测试
+    - "+.msftncsi.com"               # 微软网络连接状态
+
+  # 🏃‍♂️ Layer 1: 快速初始解析（UDP，50-100ms）
+  default-nameserver:
+    - 223.5.5.5                      # 阿里 DNS
+    - 119.29.29.29                   # 腾讯 DNS
+
+  # 🔐 Layer 2: 主要 DNS 服务（DoH 加密）
+  nameserver:
+    - https://doh.pub/dns-query      # 腾讯 DoH
+    - https://dns.alidns.com/dns-query # 阿里 DoH
+
+  # 🛡️ Layer 3: 防污染备用（国外 DoH）
+  fallback:
+    - https://1.1.1.1/dns-query      # Cloudflare DoH
+    - https://dns.google/dns-query   # Google DoH
+
+  # 🧩 智能分流过滤器
+  fallback-filter:
+    geoip: true                      # 启用 GeoIP 过滤
+    geoip-code: CN                   # 中国 IP 判定标准
+    ipcidr:
+      - 240.0.0.0/4                  # 过滤保留 IP 段
+
+  # 🎯 DNS 智能分流策略
+  nameserver-policy:
+    # 国内域名 → 国内 DNS（避免污染）
+    "geosite:cn,private,apple":
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+    
+    # 国外域名 → 国外 DNS（准确解析）
+    "geosite:geolocation-!cn":
+      - https://1.1.1.1/dns-query
+      - https://dns.google/dns-query
+    
+    # 广告域名 → 屏蔽（返回成功但不解析）
+    "geosite:category-ads-all": "rcode://success"
+
+# 🔌 TUN 模式配置（系统级代理）
+tun:
+  enable: false                      # 是否启用 TUN 模式
+  stack: system                      # 网络栈：system/gvisor
+  auto-route: true                   # 自动设置路由表
+  auto-detect-interface: true        # 自动检测接口
+  dns-hijack:
+    - any:53                         # 劫持所有 DNS 查询
+  mtu: 1500                          # 最大传输单元
+
+# 🌐 代理服务器配置示例
+proxies:
+  # Shadowsocks 示例
+  - name: "ss-example"
+    type: ss
+    server: example.com              # 替换为实际服务器地址
+    port: 8388                       # 替换为实际端口
+    cipher: chacha20-ietf-poly1305   # 加密方式
+    password: "your-password"        # 替换为实际密码
+    
+  # VMess 示例  
+  - name: "vmess-example"
+    type: vmess
+    server: example.com              # 替换为实际服务器地址
+    port: 443                        # 替换为实际端口
+    uuid: "00000000-0000-0000-0000-000000000000"  # 替换为实际UUID
+    alterId: 0
+    cipher: auto
+    network: ws                      # 传输协议：tcp/ws/h2/grpc
+    ws-opts:
+      path: "/path"                  # 替换为实际路径
+      headers:
+        Host: example.com            # 替换为实际域名
+    tls: true
+    
+  # Trojan 示例
+  - name: "trojan-example"
+    type: trojan
+    server: example.com              # 替换为实际服务器地址
+    port: 443                        # 替换为实际端口
+    password: "your-password"        # 替换为实际密码
+    sni: example.com                 # 替换为实际SNI
+
+# 🎛️ 代理组配置示例
+proxy-groups:
+  # 手动选择组
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - "♻️ 自动选择"
+      - "🎯 全球直连"
+      - "ss-example"
+      - "vmess-example"
+      - "trojan-example"
+      
+  # 自动选择组（延迟测试）
+  - name: "♻️ 自动选择"
+    type: url-test
+    proxies:
+      - "ss-example"
+      - "vmess-example"
+      - "trojan-example"
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    
+  # 负载均衡组
+  - name: "⚖️ 负载均衡"
+    type: load-balance
+    proxies:
+      - "ss-example"
+      - "vmess-example"
+      - "trojan-example"
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    strategy: consistent-hashing
+    
+  # 全球直连
+  - name: "🎯 全球直连"
+    type: select
+    proxies:
+      - DIRECT
+      
+  # 广告屏蔽
+  - name: "🛡️ 广告屏蔽"
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+
+# 🎯 智能分流规则（优先级从高到低）
+rules:
+  # 🏠 本地网络直连
+  - DOMAIN-SUFFIX,local,DIRECT
+  - DOMAIN-SUFFIX,localhost,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,17.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - GEOIP,LAN,DIRECT,no-resolve
+  
+  # 🛡️ 广告屏蔽（优先级最高）
+  - GEOSITE,category-ads-all,🛡️ 广告屏蔽
+  
+  # 🏪 国内服务直连
+  - GEOSITE,private,DIRECT
+  - GEOSITE,cn,DIRECT
+  - GEOSITE,apple-cn,DIRECT
+  - GEOSITE,microsoft@cn,DIRECT
+  - GEOSITE,steam@cn,DIRECT
+  - GEOSITE,category-games@cn,DIRECT
+  
+  # 🌍 国外服务代理
+  - GEOSITE,geolocation-!cn,🚀 节点选择
+  
+  # 🇨🇳 国内 IP 直连
+  - GEOIP,CN,DIRECT,no-resolve
+  
+  # ⚡ 其他流量走代理
+  - MATCH,🚀 节点选择
+
+# 📝 配置说明：
+# 1. 复制此文件为 config.yaml
+# 2. 替换示例中的服务器信息为实际配置
+# 3. 根据需要调整代理组和规则
+# 4. 启用 TUN 模式需要管理员权限
+# 5. DNS 配置已优化，一般无需修改
