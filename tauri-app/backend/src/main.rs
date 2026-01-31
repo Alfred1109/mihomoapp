@@ -1200,6 +1200,19 @@ async fn get_silent_start_status() -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn reset_config_to_default() -> Result<String, String> {
+    let result = config_sync::ConfigSyncManager::reset_from_template()
+        .await
+        .map_err(|e| format!("恢复默认配置失败: {}", e))?;
+        
+    if result.success {
+        Ok(format!("恢复默认配置成功，备份已创建: {}", result.backup_created))
+    } else {
+        Err("恢复默认配置失败".to_string())
+    }
+}
+
+#[tauri::command]
 async fn get_mihomo_service_status() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1380,7 +1393,8 @@ fn main() {
             set_autostart,
             get_autostart_status,
             set_silent_start,
-            get_silent_start_status
+            get_silent_start_status,
+            reset_config_to_default
         ])
         .setup(|app| {
             // Initialize application

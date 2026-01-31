@@ -209,31 +209,58 @@ impl ConfigSyncManager {
     }
     
     async fn load_template_config() -> Result<serde_json::Value> {
-        // 优先从项目根目录的 config.example.yaml 加载
-        let project_root = std::env::current_exe()
-            .context("获取执行文件路径失败")?
-            .parent()
-            .context("获取执行文件目录失败")?
-            .parent()
-            .context("获取项目根目录失败")?
-            .to_path_buf();
+        // 1. 优先尝试从 Tauri 资源系统加载（打包后的应用）
+        // 注意: 在实际运行时需要 AppHandle 来访问资源，这里先跳过资源系统加载
         
-        let example_path = project_root.join("config.example.yaml");
+        // 2. 尝试多个可能的开发环境路径
+        let possible_paths = vec![
+            // 项目根目录（开发环境）
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("../../config.example.yaml"))),
+            // 执行文件同目录
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("config.example.yaml"))),
+            // 工作目录
+            std::env::current_dir()
+                .ok()
+                .map(|dir| dir.join("config.example.yaml")),
+            // 相对于当前工作目录的上级
+            std::env::current_dir()
+                .ok()
+                .map(|dir| dir.join("../config.example.yaml")),
+        ];
         
-        if example_path.exists() {
-            let content = std::fs::read_to_string(&example_path)
-                .context("读取示例配置失败")?;
-            
-            let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)
-                .context("解析示例配置失败")?;
-            
-            serde_json::to_value(yaml_value)
-                .context("转换示例配置格式失败")
-        } else {
-            // fallback到内置默认配置
-            warn!("示例配置文件不存在，使用内置默认配置");
-            Ok(crate::mihomo::create_default_config())
+        for path_option in possible_paths {
+            if let Some(path) = path_option {
+                if path.exists() {
+                    info!("从开发环境加载配置模板: {:?}", path);
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            match serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                                Ok(yaml_value) => {
+                                    return serde_json::to_value(yaml_value)
+                                        .context("转换开发配置格式失败");
+                                }
+                                Err(e) => {
+                                    warn!("解析开发配置失败 {:?}: {}", path, e);
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("读取开发配置失败 {:?}: {}", path, e);
+                            continue;
+                        }
+                    }
+                }
+            }
         }
+        
+        // 3. 最后使用内置的优化配置作为 fallback
+        warn!("未找到 config.example.yaml，使用内置优化配置作为备用");
+        Ok(crate::mihomo::create_default_config())
     }
     
     fn get_platform_name() -> String {
