@@ -116,18 +116,18 @@ dns:
 
 #### 手动选择组
 ```yaml
-- name: "🚀 节点选择"
+- name: "PROXY"
   type: select
   proxies:
-    - "♻️ 自动选择"
-    - "🎯 全球直连"
+    - "AUTO"
+    - "DIRECT"
     - "my-ss-server"
     - "my-vmess-server"
 ```
 
 #### 自动选择组
 ```yaml
-- name: "♻️ 自动选择"
+- name: "AUTO"
   type: url-test
   proxies:
     - "my-ss-server"
@@ -148,31 +148,43 @@ rules:
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
   
   # 2. 广告屏蔽
-  - GEOSITE,category-ads-all,REJECT
+  - GEOSITE,category-ads-all,ADBLOCK
   
   # 3. 国内服务直连
   - GEOSITE,cn,DIRECT
   - GEOSITE,apple-cn,DIRECT
   
   # 4. 国外服务代理
-  - GEOSITE,geolocation-!cn,🚀 节点选择
+  - GEOSITE,geolocation-!cn,PROXY
   
   # 5. 国内IP直连
   - GEOIP,CN,DIRECT,no-resolve
   
   # 6. 默认代理
-  - MATCH,🚀 节点选择
+  - MATCH,PROXY
 ```
 
 ## 🔄 订阅配置
 
-如果使用订阅链接，可以通过以下方式配置：
+### 📋 订阅兼容性设计
 
-### 1. 应用内设置
+我们的配置采用**标准代理组命名**，确保与主流订阅服务兼容：
+
+| 标准名称 | 用途 | 订阅兼容性 |
+|----------|------|------------|
+| `PROXY` | 主代理组 | ✅ 通用标准 |
+| `AUTO` | 自动选择 | ✅ 主流支持 |
+| `DIRECT` | 直连 | ✅ 内置策略 |
+| `ADBLOCK` | 广告屏蔽 | ✅ 可选配置 |
+
+### 🔗 使用订阅链接
+
+#### 1. 应用内设置（推荐）
 - 在应用的订阅管理页面添加订阅URL
 - 应用会自动下载并合并代理节点
+- 保留DNS优化和路由规则配置
 
-### 2. 手动配置
+#### 2. 手动配置
 ```yaml
 # 在proxy-providers中添加订阅
 proxy-providers:
@@ -181,7 +193,41 @@ proxy-providers:
     url: "https://your-subscription-url"
     interval: 3600
     path: ./profiles/subscription.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 600
+
+# 代理组引用订阅
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    use:
+      - my-subscription
+    proxies:
+      - "AUTO"
+      - "DIRECT"
+      
+  - name: "AUTO"
+    type: url-test
+    use:
+      - my-subscription
+    url: http://www.gstatic.com/generate_204
+    interval: 300
 ```
+
+### ⚠️ 订阅注意事项
+
+1. **代理组冲突处理**：
+   - 订阅可能包含自己的代理组定义
+   - 我们的规则会优先引用标准名称（PROXY, AUTO等）
+   - 如订阅使用不同命名，需手动调整rules中的引用
+
+2. **配置合并原则**：
+   - DNS配置：以我们的优化配置为准
+   - 代理节点：以订阅提供的为准
+   - 路由规则：以我们的智能分流为准
+   - 代理组：可灵活组合使用
 
 ## 🛠️ 高级配置
 

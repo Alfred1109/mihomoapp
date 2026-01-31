@@ -278,7 +278,7 @@ pub fn create_default_config() -> serde_json::Value {
             "IP-CIDR,17.0.0.0/8,DIRECT,no-resolve",
             "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
             "GEOIP,LAN,DIRECT,no-resolve",
-            "GEOSITE,category-ads-all,REJECT",
+            "GEOSITE,category-ads-all,ADBLOCK",
             "GEOSITE,private,DIRECT",
             "GEOSITE,cn,DIRECT",
             "GEOSITE,apple-cn,DIRECT",

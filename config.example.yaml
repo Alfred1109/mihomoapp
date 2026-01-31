@@ -124,20 +124,20 @@ proxies:
     password: "your-password"        # 替换为实际密码
     sni: example.com                 # 替换为实际SNI
 
-# 🎛️ 代理组配置示例
+# 🎛️ 代理组配置示例（兼容订阅链接）
 proxy-groups:
-  # 手动选择组
-  - name: "🚀 节点选择"
+  # 主代理组（手动选择）
+  - name: "PROXY"
     type: select
     proxies:
-      - "♻️ 自动选择"
-      - "🎯 全球直连"
+      - "AUTO"
+      - "DIRECT"
       - "ss-example"
-      - "vmess-example"
+      - "vmess-example" 
       - "trojan-example"
       
   # 自动选择组（延迟测试）
-  - name: "♻️ 自动选择"
+  - name: "AUTO"
     type: url-test
     proxies:
       - "ss-example"
@@ -147,8 +147,8 @@ proxy-groups:
     interval: 300
     tolerance: 50
     
-  # 负载均衡组
-  - name: "⚖️ 负载均衡"
+  # 负载均衡组（可选）
+  - name: "BALANCE"
     type: load-balance
     proxies:
       - "ss-example"
@@ -158,14 +158,8 @@ proxy-groups:
     interval: 300
     strategy: consistent-hashing
     
-  # 全球直连
-  - name: "🎯 全球直连"
-    type: select
-    proxies:
-      - DIRECT
-      
-  # 广告屏蔽
-  - name: "🛡️ 广告屏蔽"
+  # 广告屏蔽组
+  - name: "ADBLOCK"
     type: select
     proxies:
       - REJECT
@@ -185,7 +179,7 @@ rules:
   - GEOIP,LAN,DIRECT,no-resolve
   
   # 🛡️ 广告屏蔽（优先级最高）
-  - GEOSITE,category-ads-all,🛡️ 广告屏蔽
+  - GEOSITE,category-ads-all,ADBLOCK
   
   # 🏪 国内服务直连
   - GEOSITE,private,DIRECT
@@ -196,13 +190,13 @@ rules:
   - GEOSITE,category-games@cn,DIRECT
   
   # 🌍 国外服务代理
-  - GEOSITE,geolocation-!cn,🚀 节点选择
+  - GEOSITE,geolocation-!cn,PROXY
   
   # 🇨🇳 国内 IP 直连
   - GEOIP,CN,DIRECT,no-resolve
   
   # ⚡ 其他流量走代理
-  - MATCH,🚀 节点选择
+  - MATCH,PROXY
 
 # 📝 配置说明：
 # 1. 复制此文件为 config.yaml
