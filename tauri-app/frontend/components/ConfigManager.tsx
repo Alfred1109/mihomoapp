@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Card,
@@ -95,17 +95,17 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   };
 
   const resetConfig = async () => {
-    if (!confirm('确定要重置配置吗？这将覆盖所有当前设置。')) {
+    if (!confirm('确定要恢复默认配置吗？这将覆盖所有当前设置并创建备份。')) {
       return;
     }
 
     setLoading(true);
     try {
-      // This would need to be implemented in the backend
+      const result = await invoke<string>('reset_config_to_default');
       await loadConfig();
-      showNotification('配置重置成功', 'success');
+      showNotification(`配置恢复成功: ${result}`, 'success');
     } catch (error) {
-      showNotification(`重置配置失败: ${error}`, 'error');
+      showNotification(`恢复默认配置失败: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -130,7 +130,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     setHasChanges(true);
   };
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
@@ -213,8 +213,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
             startIcon={<RestoreFromTrash />}
             onClick={resetConfig}
             disabled={loading}
+            color="warning"
           >
-            重置
+            恢复默认配置
           </Button>
           <Button
             variant="outlined"
