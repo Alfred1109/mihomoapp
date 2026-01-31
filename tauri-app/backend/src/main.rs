@@ -755,11 +755,22 @@ WantedBy=multi-user.target
             .output()
             .map_err(|e| format!("启用服务失败: {}", e))?;
 
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("启用服务失败: {}", stderr));
+        }
+
+        // 启动服务
+        let output = Command::new("systemctl")
+            .args(["start", "mihomo.service"])
+            .output()
+            .map_err(|e| format!("启动服务失败: {}", e))?;
+
         if output.status.success() {
-            Ok("Mihomo 服务安装并启用成功".to_string())
+            Ok("Mihomo 服务安装、启用并启动成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("启用服务失败: {}", stderr))
+            Err(format!("启动服务失败: {}", stderr))
         }
     }
 }
@@ -1167,6 +1178,32 @@ async fn set_silent_start(enable: bool) -> Result<String, String> {
         Ok("已启用静默启动".to_string())
     } else {
         Ok("已取消静默启动".to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_silent_start_status() -> Result<bool, String> {
+    let config_dir = dirs::config_dir().ok_or("无法获取配置目录")?;
+    let settings_file = config_dir.join("mihomo-manager/settings.json");
+    
+    if !settings_file.exists() {
+        return Ok(false);
+    }
+    
+    let content = std::fs::read_to_string(&settings_file)
+        .map_err(|e| format!("读取设置文件失败: {}", e))?;
+    
+    let settings: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析设置文件失败: {}", e))?;
+    
+    Ok(settings["silent_start"].as_bool().unwrap_or(false))
+}
+
+#[tauri::command]
+async fn get_mihomo_service_status() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
 
         let output = Command::new("sc")
             .args(["query", "MihomoService"])
@@ -1343,13 +1380,7 @@ fn main() {
             set_autostart,
             get_autostart_status,
             set_silent_start,
-            get_silent_start_status,
-            standardize_config,
-            check_config_status,
-            reset_config_from_template,
-            generate_config_report,
-            config_health_check,
-            migrate_config_cross_platform
+            get_silent_start_status
         ])
         .setup(|app| {
             // Initialize application

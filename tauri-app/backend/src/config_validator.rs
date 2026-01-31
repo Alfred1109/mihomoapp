@@ -147,28 +147,29 @@ impl ConfigStandardizer {
     
     /// 标准化性能配置
     fn standardize_performance(config: &mut JsonValue, changes: &mut Vec<String>) -> Result<()> {
-        let performance_configs = [
+        // 布尔配置
+        let bool_configs = [
             ("unified-delay", true, "统一延迟测试"),
             ("tcp-concurrent", true, "TCP并发连接"),
+        ];
+        
+        for (key, expected_bool, description) in bool_configs {
+            if config.get(key).and_then(|v| v.as_bool()) != Some(expected_bool) {
+                config[key] = JsonValue::Bool(expected_bool);
+                changes.push(format!("⚡ 启用{}", description));
+            }
+        }
+        
+        // 字符串配置
+        let string_configs = [
             ("find-process-mode", "strict", "严格进程匹配"),
             ("global-client-fingerprint", "chrome", "Chrome客户端指纹"),
         ];
         
-        for (key, expected_value, description) in performance_configs {
-            match expected_value {
-                serde_json::Value::Bool(expected_bool) => {
-                    if config.get(key).and_then(|v| v.as_bool()) != Some(expected_bool) {
-                        config[key] = JsonValue::Bool(expected_bool);
-                        changes.push(format!("⚡ 启用{}", description));
-                    }
-                }
-                serde_json::Value::String(expected_str) => {
-                    if config.get(key).and_then(|v| v.as_str()) != Some(expected_str) {
-                        config[key] = JsonValue::String(expected_str.to_string());
-                        changes.push(format!("🎯 设置{}", description));
-                    }
-                }
-                _ => {}
+        for (key, expected_str, description) in string_configs {
+            if config.get(key).and_then(|v| v.as_str()) != Some(expected_str) {
+                config[key] = JsonValue::String(expected_str.to_string());
+                changes.push(format!("🎯 设置{}", description));
             }
         }
         
@@ -205,7 +206,7 @@ impl ConfigStandardizer {
             "MATCH,PROXY"
         ];
         
-        if !config.contains_key("rules") {
+        if !config.as_object().unwrap_or(&serde_json::Map::new()).contains_key("rules") {
             config["rules"] = JsonValue::Array(
                 standard_rules.into_iter()
                     .map(|r| JsonValue::String(r.to_string()))
@@ -214,7 +215,8 @@ impl ConfigStandardizer {
             changes.push("📋 设置标准化路由规则".to_string());
         } else {
             // 验证和修复现有规则
-            let current_rules = config["rules"].as_array().unwrap_or(&vec![]);
+            let empty_vec = vec![];
+            let current_rules = config["rules"].as_array().unwrap_or(&empty_vec);
             let rules_str: Vec<String> = current_rules.iter()
                 .filter_map(|r| r.as_str().map(String::from))
                 .collect();
@@ -247,7 +249,7 @@ impl ConfigStandardizer {
     
     /// 标准化代理组
     fn standardize_proxy_groups(config: &mut JsonValue, changes: &mut Vec<String>) -> Result<()> {
-        if !config.contains_key("proxy-groups") {
+        if !config.as_object().unwrap_or(&serde_json::Map::new()).contains_key("proxy-groups") {
             config["proxy-groups"] = JsonValue::Array(vec![]);
         }
         
@@ -275,7 +277,7 @@ impl ConfigStandardizer {
     
     /// 标准化TUN配置
     fn standardize_tun(config: &mut JsonValue, changes: &mut Vec<String>) -> Result<()> {
-        if !config.contains_key("tun") {
+        if !config.as_object().unwrap_or(&serde_json::Map::new()).contains_key("tun") {
             config["tun"] = serde_json::json!({
                 "enable": false,
                 "stack": "system",
@@ -304,7 +306,7 @@ impl ConfigStandardizer {
                 issues.push("⚠️ IPv6已启用，可能影响解析速度".to_string());
             }
             
-            if !dns.contains_key("nameserver-policy") {
+            if !dns.as_object().unwrap_or(&serde_json::Map::new()).contains_key("nameserver-policy") {
                 issues.push("❌ 缺少DNS智能分流配置".to_string());
             }
         } else {
@@ -365,7 +367,7 @@ impl ConfigStandardizer {
             report.push_str(&format!("- IPv6: {}\n", if ipv6 { "⚠️ 已启用" } else { "✅ 已禁用" }));
             report.push_str(&format!("- HTTP/3: {}\n", if h3 { "✅ 已启用" } else { "❌ 未启用" }));
             
-            if dns.contains_key("nameserver-policy") {
+            if dns.as_object().unwrap_or(&serde_json::Map::new()).contains_key("nameserver-policy") {
                 report.push_str("- 智能分流: ✅ 已配置\n");
             } else {
                 report.push_str("- 智能分流: ❌ 未配置\n");
