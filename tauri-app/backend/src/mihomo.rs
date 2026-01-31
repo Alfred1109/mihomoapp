@@ -221,7 +221,10 @@ pub fn create_default_config() -> serde_json::Value {
                 "+.battlenet.com.cn",
                 "+.battlenet.com",
                 "+.blzstatic.cn",
-                "+.battle.net"
+                "+.battle.net",
+                "+.kuwo.cn",
+                "+.msftconnecttest.com",
+                "+.msftncsi.com"
             ],
             "default-nameserver": [
                 "223.5.5.5",
@@ -235,6 +238,7 @@ pub fn create_default_config() -> serde_json::Value {
                 "https://1.1.1.1/dns-query",
                 "https://dns.google/dns-query"
             ],
+            "prefer-h3": true,
             "fallback-filter": {
                 "geoip": true,
                 "geoip-code": "CN",
@@ -266,21 +270,22 @@ pub fn create_default_config() -> serde_json::Value {
         "proxy-groups": [],
         "rules": [
             "DOMAIN-SUFFIX,local,DIRECT",
-            "IP-CIDR,127.0.0.0/8,DIRECT",
-            "IP-CIDR,172.16.0.0/12,DIRECT",
-            "IP-CIDR,192.168.0.0/16,DIRECT",
-            "IP-CIDR,10.0.0.0/8,DIRECT",
-            "IP-CIDR,17.0.0.0/8,DIRECT",
-            "IP-CIDR,100.64.0.0/10,DIRECT",
+            "DOMAIN-SUFFIX,localhost,DIRECT",
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+            "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+            "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+            "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+            "IP-CIDR,17.0.0.0/8,DIRECT,no-resolve",
+            "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+            "GEOIP,LAN,DIRECT,no-resolve",
+            "GEOSITE,category-ads-all,REJECT",
             "GEOSITE,private,DIRECT",
             "GEOSITE,cn,DIRECT",
-            "GEOSITE,category-ads-all,REJECT",
             "GEOSITE,apple-cn,DIRECT",
             "GEOSITE,microsoft@cn,DIRECT",
             "GEOSITE,steam@cn,DIRECT",
             "GEOSITE,category-games@cn,DIRECT",
             "GEOSITE,geolocation-!cn,PROXY",
-            "GEOIP,LAN,DIRECT,no-resolve",
             "GEOIP,CN,DIRECT,no-resolve",
             "MATCH,PROXY"
         ]
