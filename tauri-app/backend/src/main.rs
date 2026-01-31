@@ -4,6 +4,8 @@
 mod backup;
 mod config;
 mod config_manager;
+mod config_sync;
+mod config_validator;
 mod error;
 mod events;
 mod mihomo;
@@ -1165,36 +1167,6 @@ async fn set_silent_start(enable: bool) -> Result<String, String> {
         Ok("已启用静默启动".to_string())
     } else {
         Ok("已取消静默启动".to_string())
-    }
-}
-
-#[tauri::command]
-async fn get_silent_start_status() -> Result<bool, String> {
-    let config_dir = match dirs::config_dir() {
-        Some(dir) => dir,
-        None => return Ok(false),
-    };
-
-    let settings_file = config_dir.join("mihomo-manager/settings.json");
-
-    if !settings_file.exists() {
-        return Ok(false);
-    }
-
-    let content =
-        std::fs::read_to_string(&settings_file).map_err(|e| format!("读取设置失败: {}", e))?;
-
-    let settings: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| format!("解析设置失败: {}", e))?;
-
-    Ok(settings["silent_start"].as_bool().unwrap_or(false))
-}
-
-#[tauri::command]
-async fn get_mihomo_service_status() -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
 
         let output = Command::new("sc")
             .args(["query", "MihomoService"])
@@ -1371,7 +1343,13 @@ fn main() {
             set_autostart,
             get_autostart_status,
             set_silent_start,
-            get_silent_start_status
+            get_silent_start_status,
+            standardize_config,
+            check_config_status,
+            reset_config_from_template,
+            generate_config_report,
+            config_health_check,
+            migrate_config_cross_platform
         ])
         .setup(|app| {
             // Initialize application
