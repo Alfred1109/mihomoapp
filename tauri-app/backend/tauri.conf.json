@@ -13,6 +13,17 @@
   "tauri": {
     "allowlist": {
       "all": false,
+      "window": {
+        "all": false,
+        "close": true,
+        "hide": true,
+        "show": true,
+        "maximize": true,
+        "minimize": true,
+        "unmaximize": true,
+        "unminimize": true,
+        "startDragging": true
+      },
       "shell": {
         "open": true,
         "execute": true,
@@ -25,10 +36,7 @@
         ]
       },
       "dialog": {
-        "ask": true,
-        "message": true,
-        "open": false,
-        "save": false
+        "all": true
       },
       "fs": {
         "readFile": true,
@@ -97,10 +105,13 @@
         "title": "Mihomo Manager",
         "width": 1200,
         "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 900,
+        "minHeight": 650,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "center": true
       }
     ]
   }

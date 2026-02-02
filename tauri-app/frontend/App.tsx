@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Container,
   Box,
   Tabs,
   Tab,
@@ -14,10 +10,12 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
-import { Language } from '@mui/icons-material';
+import { Language, FiberManualRecord } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 import { useTranslation } from 'react-i18next';
+import TitleBar from './components/TitleBar';
 import Dashboard from './components/Dashboard';
 import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
@@ -64,9 +62,7 @@ function App() {
   }, []);
 
   const checkMihomoStatus = useCallback(async () => {
-    if (!isTauriEnv()) {
-      return;
-    }
+    if (!isTauriEnv()) return;
     
     try {
       const serviceStatus = await invoke<string>('get_mihomo_service_status');
@@ -87,11 +83,9 @@ function App() {
             timestamp: Date.now(),
           });
         } catch {
-          // Ignore error
         }
       }
-    } catch (error) {
-      console.error('Failed to get mihomo status:', error);
+    } catch {
     }
   }, [setMihomoStatus]);
 
@@ -109,8 +103,7 @@ function App() {
       if (!adminStatus) {
         showNotification(t('permissions.requiresAdmin'), 'warning');
       }
-    } catch (error) {
-      console.error('Failed to check admin privileges:', error);
+    } catch {
       setAdminCheckDone(true);
     }
   }, [setIsAdmin, setAdminCheckDone, showNotification, t]);
@@ -120,7 +113,6 @@ function App() {
     
     try {
       await invoke('restart_as_admin');
-      showNotification(t('notifications.startError'), 'error');
     } catch (error) {
       showNotification(`${t('notifications.startError')}: ${error}`, 'error');
     }
@@ -152,83 +144,68 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <Box sx={{ flexGrow: 1 }}>
-        <AppBar position="static" elevation={0}>
-          <Toolbar>
-            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-              {t('app.title')}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <IconButton
-                color="inherit"
-                onClick={handleLanguageMenuOpen}
-                size="small"
-                title="Language"
-              >
-                <Language />
-              </IconButton>
-              <Menu
-                anchorEl={langMenuAnchor}
-                open={Boolean(langMenuAnchor)}
-                onClose={handleLanguageMenuClose}
-              >
-                <MenuItem onClick={() => handleLanguageChange('en')} selected={i18n.language === 'en'}>
-                  English
-                </MenuItem>
-                <MenuItem onClick={() => handleLanguageChange('zh')} selected={i18n.language === 'zh'}>
-                  中文
-                </MenuItem>
-              </Menu>
-              {adminCheckDone && (
-                <Chip
-                  label={isAdmin ? t('permissions.admin') : t('permissions.normal')}
-                  color={isAdmin ? 'success' : 'warning'}
-                  size="small"
-                  variant="filled"
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <TitleBar>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 1 }}>
+            <Tooltip title={mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1 }}>
+                <FiberManualRecord 
+                  sx={{ 
+                    fontSize: 10, 
+                    color: mihomoStatus.running ? 'success.main' : 'error.main',
+                  }} 
                 />
-              )}
-              {adminCheckDone && !isAdmin && (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  color="warning"
-                  onClick={handleRestartAsAdmin}
-                  sx={{ color: 'white', borderColor: 'white' }}
-                >
-                  {t('permissions.restartAsAdmin')}
-                </Button>
-              )}
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  px: 2,
-                  py: 0.5,
-                  borderRadius: 1,
-                  backgroundColor: mihomoStatus.running ? 'success.main' : 'error.main',
-                  color: 'white',
+              </Box>
+            </Tooltip>
+
+            {adminCheckDone && !isAdmin && (
+              <Button
+                size="small"
+                color="warning"
+                onClick={handleRestartAsAdmin}
+                sx={{ 
+                  fontSize: '0.7rem', 
+                  py: 0.25, 
+                  px: 1,
+                  minWidth: 'auto',
                 }}
               >
-                <Box
-                  sx={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    backgroundColor: 'currentColor',
-                  }}
-                />
-                <Typography variant="body2">
-                  {mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}
-                </Typography>
-              </Box>
-            </Box>
-          </Toolbar>
-        </AppBar>
+                {t('permissions.restartAsAdmin')}
+              </Button>
+            )}
 
-        <Container maxWidth="xl" sx={{ mt: 2 }}>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <Tabs value={tabValue} onChange={handleTabChange} aria-label="mihomo manager tabs">
+            <IconButton
+              size="small"
+              onClick={handleLanguageMenuOpen}
+              sx={{ color: 'text.secondary' }}
+            >
+              <Language sx={{ fontSize: 18 }} />
+            </IconButton>
+            <Menu
+              anchorEl={langMenuAnchor}
+              open={Boolean(langMenuAnchor)}
+              onClose={handleLanguageMenuClose}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            >
+              <MenuItem onClick={() => handleLanguageChange('en')} selected={i18n.language === 'en'}>
+                English
+              </MenuItem>
+              <MenuItem onClick={() => handleLanguageChange('zh')} selected={i18n.language === 'zh'}>
+                中文
+              </MenuItem>
+            </Menu>
+          </Box>
+        </TitleBar>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: 'background.paper' }}>
+            <Tabs 
+              value={tabValue} 
+              onChange={handleTabChange} 
+              aria-label="mihomo manager tabs"
+              sx={{ px: 2, minHeight: 42 }}
+            >
               <Tab label={t('app.dashboard')} />
               <Tab label={t('app.subscription')} />
               <Tab label={t('app.proxy')} />
@@ -236,44 +213,46 @@ function App() {
             </Tabs>
           </Box>
 
-          <TabPanel value={tabValue} index={0}>
-            <ErrorBoundary>
-              <Dashboard 
-                isRunning={mihomoStatus.running}
-                onStatusChange={checkMihomoStatus}
-                showNotification={showNotification}
-              />
-            </ErrorBoundary>
-          </TabPanel>
+          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+            <TabPanel value={tabValue} index={0}>
+              <ErrorBoundary>
+                <Dashboard 
+                  isRunning={mihomoStatus.running}
+                  onStatusChange={checkMihomoStatus}
+                  showNotification={showNotification}
+                />
+              </ErrorBoundary>
+            </TabPanel>
 
-          <TabPanel value={tabValue} index={1}>
-            <ErrorBoundary>
-              <SubscriptionManager showNotification={showNotification} />
-            </ErrorBoundary>
-          </TabPanel>
+            <TabPanel value={tabValue} index={1}>
+              <ErrorBoundary>
+                <SubscriptionManager showNotification={showNotification} />
+              </ErrorBoundary>
+            </TabPanel>
 
-          <TabPanel value={tabValue} index={2}>
-            <ErrorBoundary>
-              <ProxyManager 
-                isRunning={mihomoStatus.running}
-                showNotification={showNotification}
-              />
-            </ErrorBoundary>
-          </TabPanel>
+            <TabPanel value={tabValue} index={2}>
+              <ErrorBoundary>
+                <ProxyManager 
+                  isRunning={mihomoStatus.running}
+                  showNotification={showNotification}
+                />
+              </ErrorBoundary>
+            </TabPanel>
 
-          <TabPanel value={tabValue} index={3}>
-            <ErrorBoundary>
-              <ConfigManager 
-                isRunning={mihomoStatus.running}
-                showNotification={showNotification}
-              />
-            </ErrorBoundary>
-          </TabPanel>
-        </Container>
+            <TabPanel value={tabValue} index={3}>
+              <ErrorBoundary>
+                <ConfigManager 
+                  isRunning={mihomoStatus.running}
+                  showNotification={showNotification}
+                />
+              </ErrorBoundary>
+            </TabPanel>
+          </Box>
+        </Box>
 
         <Snackbar
           open={notification.open}
-          autoHideDuration={6000}
+          autoHideDuration={4000}
           onClose={handleCloseNotification}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
@@ -281,6 +260,7 @@ function App() {
             onClose={handleCloseNotification} 
             severity={notification.severity}
             variant="filled"
+            sx={{ fontSize: '0.8125rem' }}
           >
             {notification.message}
           </Alert>
