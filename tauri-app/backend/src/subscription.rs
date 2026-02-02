@@ -503,67 +503,654 @@ fn parse_proxy_url(url: &str) -> Result<serde_json::Value> {
         parse_vmess_url(url)
     } else if url.starts_with("trojan://") {
         parse_trojan_url(url)
+    } else if url.starts_with("vless://") {
+        parse_vless_url(url)
+    } else if url.starts_with("hysteria2://") || url.starts_with("hy2://") {
+        parse_hysteria2_url(url)
     } else {
-        Err(anyhow::anyhow!("Unsupported proxy URL format"))
+        Err(anyhow::anyhow!("Unsupported proxy URL format: {}", &url[..url.len().min(20)]))
     }
 }
 
 fn parse_shadowsocks_url(url: &str) -> Result<serde_json::Value> {
-    // Basic SS URL parsing
     let url = url
         .strip_prefix("ss://")
         .ok_or_else(|| anyhow::anyhow!("Invalid SS URL: missing ss:// prefix"))?;
 
-    // Decode base64 part
-    let parts: Vec<&str> = url.splitn(2, '@').collect();
+    let (main_part, name) = if let Some(idx) = url.find('#') {
+        let (main, fragment) = url.split_at(idx);
+        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+    } else {
+        (url.to_string(), String::new())
+    };
+
+    let (method, password, server, port) = if main_part.contains('@') {
+        let parts: Vec<&str> = main_part.splitn(2, '@').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid SS URL format"));
+        }
+
+        let user_info = decode_base64_flexible(parts[0])?;
+        let method_pass_parts: Vec<&str> = user_info.splitn(2, ':').collect();
+        if method_pass_parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid method:password format"));
+        }
+
+        let server_port: Vec<&str> = parts[1].splitn(2, ':').collect();
+        if server_port.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid server:port format"));
+        }
+
+        (
+            method_pass_parts[0].to_string(),
+            method_pass_parts[1].to_string(),
+            server_port[0].to_string(),
+            server_port[1].parse::<u16>()?,
+        )
+    } else {
+        let decoded = decode_base64_flexible(&main_part)?;
+        let parts: Vec<&str> = decoded.splitn(2, '@').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid SS URL format after base64 decode"));
+        }
+
+        let method_pass_parts: Vec<&str> = parts[0].splitn(2, ':').collect();
+        if method_pass_parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid method:password format"));
+        }
+
+        let server_port: Vec<&str> = parts[1].splitn(2, ':').collect();
+        if server_port.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid server:port format"));
+        }
+
+        (
+            method_pass_parts[0].to_string(),
+            method_pass_parts[1].to_string(),
+            server_port[0].to_string(),
+            server_port[1].parse::<u16>()?,
+        )
+    };
+
+    let final_name = if name.is_empty() {
+        format!("SS-{}", server)
+    } else {
+        name
+    };
+
+    Ok(serde_json::json!({
+        "name": final_name,
+        "type": "ss",
+        "server": server,
+        "port": port,
+        "cipher": method,
+        "password": password
+    }))
+}
+
+fn parse_shadowsocksr_url(url: &str) -> Result<serde_json::Value> {
+    let url = url
+        .strip_prefix("ssr://")
+        .ok_or_else(|| anyhow::anyhow!("Invalid SSR URL: missing ssr:// prefix"))?;
+
+    let decoded = decode_base64_flexible(url)?;
+
+    let main_params: Vec<&str> = decoded.splitn(2, "/?").collect();
+    let main_part = main_params[0];
+
+    let parts: Vec<&str> = main_part.split(':').collect();
+    if parts.len() < 6 {
+        return Err(anyhow::anyhow!("Invalid SSR URL format: insufficient parts"));
+    }
+
+    let server = parts[0].to_string();
+    let port: u16 = parts[1].parse()?;
+    let protocol = parts[2].to_string();
+    let method = parts[3].to_string();
+    let obfs = parts[4].to_string();
+    let password_b64 = parts[5..].join(":");
+    let password = decode_base64_flexible(&password_b64)?;
+
+    let mut name = format!("SSR-{}", server);
+    let mut obfs_param = String::new();
+    let mut protocol_param = String::new();
+
+    if main_params.len() > 1 {
+        let params_str = main_params[1];
+        for param in params_str.split('&') {
+            let kv: Vec<&str> = param.splitn(2, '=').collect();
+            if kv.len() == 2 {
+                match kv[0] {
+                    "remarks" => {
+                        if let Ok(decoded_name) = decode_base64_flexible(kv[1]) {
+                            name = decoded_name;
+                        }
+                    }
+                    "obfsparam" => {
+                        if let Ok(decoded) = decode_base64_flexible(kv[1]) {
+                            obfs_param = decoded;
+                        }
+                    }
+                    "protoparam" => {
+                        if let Ok(decoded) = decode_base64_flexible(kv[1]) {
+                            protocol_param = decoded;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let mut proxy = serde_json::json!({
+        "name": name,
+        "type": "ssr",
+        "server": server,
+        "port": port,
+        "cipher": method,
+        "password": password,
+        "protocol": protocol,
+        "obfs": obfs
+    });
+
+    if !obfs_param.is_empty() {
+        proxy["obfs-param"] = serde_json::json!(obfs_param);
+    }
+    if !protocol_param.is_empty() {
+        proxy["protocol-param"] = serde_json::json!(protocol_param);
+    }
+
+    Ok(proxy)
+}
+
+fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
+    let url = url
+        .strip_prefix("vmess://")
+        .ok_or_else(|| anyhow::anyhow!("Invalid VMess URL: missing vmess:// prefix"))?;
+
+    let decoded = decode_base64_flexible(url)?;
+    let config: serde_json::Value = serde_json::from_str(&decoded)
+        .context("Failed to parse VMess JSON config")?;
+
+    let name = config["ps"].as_str()
+        .or_else(|| config["remarks"].as_str())
+        .unwrap_or("VMess")
+        .to_string();
+
+    let server = config["add"].as_str()
+        .or_else(|| config["host"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("VMess config missing server address"))?
+        .to_string();
+
+    let port: u16 = match &config["port"] {
+        serde_json::Value::Number(n) => n.as_u64().unwrap_or(443) as u16,
+        serde_json::Value::String(s) => s.parse().unwrap_or(443),
+        _ => 443,
+    };
+
+    let uuid = config["id"].as_str()
+        .ok_or_else(|| anyhow::anyhow!("VMess config missing UUID"))?
+        .to_string();
+
+    let alter_id: u32 = match &config["aid"] {
+        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) as u32,
+        serde_json::Value::String(s) => s.parse().unwrap_or(0),
+        _ => 0,
+    };
+
+    let network = config["net"].as_str().unwrap_or("tcp").to_string();
+
+    let tls = match &config["tls"] {
+        serde_json::Value::String(s) => s == "tls",
+        serde_json::Value::Bool(b) => *b,
+        _ => false,
+    };
+
+    let mut proxy = serde_json::json!({
+        "name": name,
+        "type": "vmess",
+        "server": server,
+        "port": port,
+        "uuid": uuid,
+        "alterId": alter_id,
+        "cipher": config["scy"].as_str().unwrap_or("auto"),
+        "tls": tls,
+        "skip-cert-verify": true,
+        "udp": true
+    });
+
+    if let Some(sni) = config["sni"].as_str() {
+        if !sni.is_empty() {
+            proxy["servername"] = serde_json::json!(sni);
+        }
+    }
+
+    match network.as_str() {
+        "ws" => {
+            let mut ws_opts = serde_json::json!({});
+            
+            let path = config["path"].as_str().unwrap_or("/");
+            ws_opts["path"] = serde_json::json!(path);
+            
+            let host = config["host"].as_str()
+                .filter(|h| !h.is_empty())
+                .unwrap_or(&server);
+            ws_opts["headers"] = serde_json::json!({
+                "Host": host
+            });
+            
+            proxy["network"] = serde_json::json!("ws");
+            proxy["ws-opts"] = ws_opts;
+        }
+        "grpc" => {
+            proxy["network"] = serde_json::json!("grpc");
+            if let Some(path) = config["path"].as_str() {
+                proxy["grpc-opts"] = serde_json::json!({
+                    "grpc-service-name": path
+                });
+            }
+        }
+        "h2" => {
+            proxy["network"] = serde_json::json!("h2");
+            let mut h2_opts = serde_json::json!({});
+            if let Some(path) = config["path"].as_str() {
+                h2_opts["path"] = serde_json::json!(path);
+            }
+            if let Some(host) = config["host"].as_str() {
+                h2_opts["host"] = serde_json::json!([host]);
+            }
+            proxy["h2-opts"] = h2_opts;
+        }
+        _ => {}
+    }
+
+    Ok(proxy)
+}
+
+fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
+    let url = url
+        .strip_prefix("trojan://")
+        .ok_or_else(|| anyhow::anyhow!("Invalid Trojan URL: missing trojan:// prefix"))?;
+
+    let (main_part, name) = if let Some(idx) = url.find('#') {
+        let (main, fragment) = url.split_at(idx);
+        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+    } else {
+        (url.to_string(), String::new())
+    };
+
+    let (password_server, query) = if let Some(idx) = main_part.find('?') {
+        let (ps, q) = main_part.split_at(idx);
+        (ps.to_string(), q[1..].to_string())
+    } else {
+        (main_part.clone(), String::new())
+    };
+
+    let parts: Vec<&str> = password_server.splitn(2, '@').collect();
     if parts.len() != 2 {
-        return Err(anyhow::anyhow!("Invalid SS URL format"));
+        return Err(anyhow::anyhow!("Invalid Trojan URL format"));
     }
 
-    let method_password = String::from_utf8(base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        parts[0],
-    )?)?;
-    let method_pass_parts: Vec<&str> = method_password.splitn(2, ':').collect();
-    if method_pass_parts.len() != 2 {
-        return Err(anyhow::anyhow!("Invalid method:password format"));
-    }
-
-    let server_port_name: Vec<&str> = parts[1].splitn(2, '#').collect();
-    let server_port: Vec<&str> = server_port_name[0].splitn(2, ':').collect();
+    let password = urlencoding::decode(parts[0])?.to_string();
+    let server_port: Vec<&str> = parts[1].splitn(2, ':').collect();
     if server_port.len() != 2 {
         return Err(anyhow::anyhow!("Invalid server:port format"));
     }
 
-    let name = if server_port_name.len() > 1 {
-        urlencoding::decode(server_port_name[1])?.to_string()
+    let server = server_port[0].to_string();
+    let port: u16 = server_port[1].parse()?;
+
+    let final_name = if name.is_empty() {
+        format!("Trojan-{}", server)
     } else {
-        format!("SS-{}", server_port[0])
+        name
     };
 
-    Ok(serde_json::json!({
-        "name": name,
-        "type": "ss",
-        "server": server_port[0],
-        "port": server_port[1].parse::<u16>()?,
-        "cipher": method_pass_parts[0],
-        "password": method_pass_parts[1]
-    }))
+    let mut params: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !query.is_empty() {
+        for param in query.split('&') {
+            let kv: Vec<&str> = param.splitn(2, '=').collect();
+            if kv.len() == 2 {
+                params.insert(
+                    kv[0].to_string(),
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                );
+            }
+        }
+    }
+
+    let mut proxy = serde_json::json!({
+        "name": final_name,
+        "type": "trojan",
+        "server": server,
+        "port": port,
+        "password": password,
+        "skip-cert-verify": true,
+        "udp": true
+    });
+
+    if let Some(sni) = params.get("sni") {
+        if !sni.is_empty() {
+            proxy["sni"] = serde_json::json!(sni);
+        }
+    }
+
+    if let Some(alpn) = params.get("alpn") {
+        let alpn_list: Vec<&str> = alpn.split(',').collect();
+        proxy["alpn"] = serde_json::json!(alpn_list);
+    }
+
+    let network = params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
+    
+    match network {
+        "ws" => {
+            proxy["network"] = serde_json::json!("ws");
+            let mut ws_opts = serde_json::json!({});
+            
+            if let Some(path) = params.get("path") {
+                ws_opts["path"] = serde_json::json!(path);
+            }
+            if let Some(host) = params.get("host") {
+                ws_opts["headers"] = serde_json::json!({
+                    "Host": host
+                });
+            }
+            
+            proxy["ws-opts"] = ws_opts;
+        }
+        "grpc" => {
+            proxy["network"] = serde_json::json!("grpc");
+            if let Some(service_name) = params.get("serviceName") {
+                proxy["grpc-opts"] = serde_json::json!({
+                    "grpc-service-name": service_name
+                });
+            }
+        }
+        _ => {}
+    }
+
+    if params.get("security").map(|s| s.as_str()) == Some("reality") {
+        proxy["reality-opts"] = serde_json::json!({
+            "public-key": params.get("pbk").unwrap_or(&String::new()),
+            "short-id": params.get("sid").unwrap_or(&String::new())
+        });
+        if let Some(fp) = params.get("fp") {
+            proxy["client-fingerprint"] = serde_json::json!(fp);
+        }
+    }
+
+    Ok(proxy)
 }
 
-fn parse_shadowsocksr_url(_url: &str) -> Result<serde_json::Value> {
-    // SSR parsing would be more complex, placeholder for now
-    Err(anyhow::anyhow!("SSR URL parsing not implemented yet"))
+fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
+    let url = url
+        .strip_prefix("vless://")
+        .ok_or_else(|| anyhow::anyhow!("Invalid VLESS URL: missing vless:// prefix"))?;
+
+    let (main_part, name) = if let Some(idx) = url.find('#') {
+        let (main, fragment) = url.split_at(idx);
+        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+    } else {
+        (url.to_string(), String::new())
+    };
+
+    let (uuid_server, query) = if let Some(idx) = main_part.find('?') {
+        let (us, q) = main_part.split_at(idx);
+        (us.to_string(), q[1..].to_string())
+    } else {
+        (main_part.clone(), String::new())
+    };
+
+    let parts: Vec<&str> = uuid_server.splitn(2, '@').collect();
+    if parts.len() != 2 {
+        return Err(anyhow::anyhow!("Invalid VLESS URL format"));
+    }
+
+    let uuid = parts[0].to_string();
+    let server_port: Vec<&str> = parts[1].splitn(2, ':').collect();
+    if server_port.len() != 2 {
+        return Err(anyhow::anyhow!("Invalid server:port format"));
+    }
+
+    let server = server_port[0].to_string();
+    let port: u16 = server_port[1].parse()?;
+
+    let final_name = if name.is_empty() {
+        format!("VLESS-{}", server)
+    } else {
+        name
+    };
+
+    let mut params: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !query.is_empty() {
+        for param in query.split('&') {
+            let kv: Vec<&str> = param.splitn(2, '=').collect();
+            if kv.len() == 2 {
+                params.insert(
+                    kv[0].to_string(),
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                );
+            }
+        }
+    }
+
+    let mut proxy = serde_json::json!({
+        "name": final_name,
+        "type": "vless",
+        "server": server,
+        "port": port,
+        "uuid": uuid,
+        "skip-cert-verify": true,
+        "udp": true
+    });
+
+    let flow = params.get("flow").map(|s| s.as_str()).unwrap_or("");
+    if !flow.is_empty() {
+        proxy["flow"] = serde_json::json!(flow);
+    }
+
+    if let Some(sni) = params.get("sni") {
+        if !sni.is_empty() {
+            proxy["servername"] = serde_json::json!(sni);
+        }
+    }
+
+    if let Some(alpn) = params.get("alpn") {
+        let alpn_list: Vec<&str> = alpn.split(',').collect();
+        proxy["alpn"] = serde_json::json!(alpn_list);
+    }
+
+    let network = params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
+    
+    match network {
+        "ws" => {
+            proxy["network"] = serde_json::json!("ws");
+            let mut ws_opts = serde_json::json!({});
+            
+            if let Some(path) = params.get("path") {
+                ws_opts["path"] = serde_json::json!(path);
+            }
+            if let Some(host) = params.get("host") {
+                ws_opts["headers"] = serde_json::json!({
+                    "Host": host
+                });
+            }
+            
+            proxy["ws-opts"] = ws_opts;
+        }
+        "grpc" => {
+            proxy["network"] = serde_json::json!("grpc");
+            if let Some(service_name) = params.get("serviceName") {
+                proxy["grpc-opts"] = serde_json::json!({
+                    "grpc-service-name": service_name
+                });
+            }
+        }
+        "h2" => {
+            proxy["network"] = serde_json::json!("h2");
+            let mut h2_opts = serde_json::json!({});
+            if let Some(path) = params.get("path") {
+                h2_opts["path"] = serde_json::json!(path);
+            }
+            if let Some(host) = params.get("host") {
+                h2_opts["host"] = serde_json::json!([host]);
+            }
+            proxy["h2-opts"] = h2_opts;
+        }
+        _ => {}
+    }
+
+    let security = params.get("security").map(|s| s.as_str()).unwrap_or("");
+    
+    match security {
+        "tls" => {
+            proxy["tls"] = serde_json::json!(true);
+        }
+        "reality" => {
+            proxy["tls"] = serde_json::json!(true);
+            proxy["reality-opts"] = serde_json::json!({
+                "public-key": params.get("pbk").unwrap_or(&String::new()),
+                "short-id": params.get("sid").unwrap_or(&String::new())
+            });
+            if let Some(fp) = params.get("fp") {
+                proxy["client-fingerprint"] = serde_json::json!(fp);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(proxy)
 }
 
-fn parse_vmess_url(_url: &str) -> Result<serde_json::Value> {
-    // VMess parsing would be more complex, placeholder for now
-    Err(anyhow::anyhow!("VMess URL parsing not implemented yet"))
+fn parse_hysteria2_url(url: &str) -> Result<serde_json::Value> {
+    let url = url
+        .strip_prefix("hysteria2://")
+        .or_else(|| url.strip_prefix("hy2://"))
+        .ok_or_else(|| anyhow::anyhow!("Invalid Hysteria2 URL"))?;
+
+    let (main_part, name) = if let Some(idx) = url.find('#') {
+        let (main, fragment) = url.split_at(idx);
+        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+    } else {
+        (url.to_string(), String::new())
+    };
+
+    let (password_server, query) = if let Some(idx) = main_part.find('?') {
+        let (ps, q) = main_part.split_at(idx);
+        (ps.to_string(), q[1..].to_string())
+    } else {
+        (main_part.clone(), String::new())
+    };
+
+    let parts: Vec<&str> = password_server.splitn(2, '@').collect();
+    if parts.len() != 2 {
+        return Err(anyhow::anyhow!("Invalid Hysteria2 URL format"));
+    }
+
+    let password = urlencoding::decode(parts[0])?.to_string();
+    let server_port: Vec<&str> = parts[1].splitn(2, ':').collect();
+    if server_port.len() != 2 {
+        return Err(anyhow::anyhow!("Invalid server:port format"));
+    }
+
+    let server = server_port[0].to_string();
+    let port: u16 = server_port[1].parse()?;
+
+    let final_name = if name.is_empty() {
+        format!("Hysteria2-{}", server)
+    } else {
+        name
+    };
+
+    let mut params: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !query.is_empty() {
+        for param in query.split('&') {
+            let kv: Vec<&str> = param.splitn(2, '=').collect();
+            if kv.len() == 2 {
+                params.insert(
+                    kv[0].to_string(),
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                );
+            }
+        }
+    }
+
+    let mut proxy = serde_json::json!({
+        "name": final_name,
+        "type": "hysteria2",
+        "server": server,
+        "port": port,
+        "password": password,
+        "skip-cert-verify": true
+    });
+
+    if let Some(sni) = params.get("sni") {
+        if !sni.is_empty() {
+            proxy["sni"] = serde_json::json!(sni);
+        }
+    }
+
+    if let Some(obfs) = params.get("obfs") {
+        proxy["obfs"] = serde_json::json!(obfs);
+        if let Some(obfs_password) = params.get("obfs-password") {
+            proxy["obfs-password"] = serde_json::json!(obfs_password);
+        }
+    }
+
+    if let Some(alpn) = params.get("alpn") {
+        let alpn_list: Vec<&str> = alpn.split(',').collect();
+        proxy["alpn"] = serde_json::json!(alpn_list);
+    }
+
+    Ok(proxy)
 }
 
-fn parse_trojan_url(_url: &str) -> Result<serde_json::Value> {
-    // Trojan parsing would be more complex, placeholder for now
-    Err(anyhow::anyhow!("Trojan URL parsing not implemented yet"))
+fn decode_base64_flexible(input: &str) -> Result<String> {
+    use base64::Engine;
+    
+    let input = input.trim();
+    
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(input) {
+        if let Ok(s) = String::from_utf8(decoded) {
+            return Ok(s);
+        }
+    }
+    
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD_NO_PAD.decode(input) {
+        if let Ok(s) = String::from_utf8(decoded) {
+            return Ok(s);
+        }
+    }
+    
+    if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE.decode(input) {
+        if let Ok(s) = String::from_utf8(decoded) {
+            return Ok(s);
+        }
+    }
+    
+    if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input) {
+        if let Ok(s) = String::from_utf8(decoded) {
+            return Ok(s);
+        }
+    }
+    
+    let sanitized = input
+        .replace('-', "+")
+        .replace('_', "/");
+    
+    let padded = match sanitized.len() % 4 {
+        2 => format!("{}==", sanitized),
+        3 => format!("{}=", sanitized),
+        _ => sanitized,
+    };
+    
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&padded) {
+        if let Ok(s) = String::from_utf8(decoded) {
+            return Ok(s);
+        }
+    }
+    
+    Err(anyhow::anyhow!("Failed to decode base64 string"))
 }
 
 async fn load_subscriptions() -> Result<SubscriptionStorage> {
