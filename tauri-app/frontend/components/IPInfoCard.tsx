@@ -17,6 +17,7 @@ import {
   Public,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { isTauriEnv } from '../utils/tauri';
 
 interface IPInfoCardProps {
   isRunning: boolean;
@@ -32,7 +33,7 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
   }, [isRunning]);
 
   const loadIpInfo = async (forceRefresh = false) => {
-    if (typeof window === 'undefined' || !(window as any).__TAURI_IPC__) return;
+    if (!isTauriEnv()) return;
     
     // 检查缓存（5分钟内不重复请求）
     const cachedData = localStorage.getItem('ipInfo');

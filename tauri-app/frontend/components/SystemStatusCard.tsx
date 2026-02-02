@@ -19,6 +19,7 @@ import {
   CheckCircle,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { isTauriEnv } from '../utils/tauri';
 
 interface SystemStatusCardProps {
   isRunning: boolean;
@@ -44,7 +45,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
   }, [isRunning]);
 
   const loadSystemStatus = async () => {
-    if (typeof window === 'undefined' || !(window as any).__TAURI_IPC__) return;
+    if (!isTauriEnv()) return;
 
     try {
       // 只加载配置，不加载代理数据（减少API调用）

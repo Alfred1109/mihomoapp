@@ -10,7 +10,6 @@ export function isTauriEnv(): boolean {
 
 export function runInTauri<T>(fn: () => Promise<T>): Promise<T | null> {
   if (!isTauriEnv()) {
-    console.log('Running in browser mode - Tauri API not available');
     return Promise.resolve(null);
   }
   return fn();
