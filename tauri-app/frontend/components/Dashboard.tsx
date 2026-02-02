@@ -6,7 +6,7 @@ import SystemStatusCard from './SystemStatusCard';
 
 interface DashboardProps {
   isRunning: boolean;
-  onStatusChange: (status: boolean) => void;
+  onStatusChange: () => void;
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 

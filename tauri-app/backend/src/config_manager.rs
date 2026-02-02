@@ -7,6 +7,22 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 use yaml_rust::YamlLoader;
 
+struct FileGuard {
+    file: File,
+}
+
+impl FileGuard {
+    fn new(file: File) -> Self {
+        Self { file }
+    }
+}
+
+impl Drop for FileGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 pub struct ConfigManager {
     config_path: PathBuf,
     lock: Arc<RwLock<()>>,
@@ -28,9 +44,8 @@ impl ConfigManager {
         }
 
         let file = File::open(&self.config_path).context("Failed to open config file")?;
-
-        file.lock_shared()
-            .context("Failed to acquire shared lock")?;
+        file.lock_shared().context("Failed to acquire shared lock")?;
+        let _file_guard = FileGuard::new(file);
 
         let content =
             std::fs::read_to_string(&self.config_path).context("Failed to read config file")?;
@@ -44,8 +59,6 @@ impl ConfigManager {
         let yaml_value = &yaml_docs[0];
         let json_value =
             crate::config::yaml_to_json(yaml_value).context("Failed to convert YAML to JSON")?;
-
-        file.unlock().ok();
 
         info!("Config read successfully: {:?}", self.config_path);
 
@@ -80,13 +93,8 @@ impl ConfigManager {
                 .open(&temp_path)
                 .context("Failed to open temp file")?;
 
-            temp_file
-                .lock_exclusive()
-                .context("Failed to acquire exclusive lock")?;
-
-            temp_file.sync_all().context("Failed to sync temp file")?;
-
-            temp_file.unlock().ok();
+            temp_file.lock_exclusive().context("Failed to acquire exclusive lock")?;
+            let _file_guard = FileGuard::new(temp_file);
         }
 
         std::fs::rename(&temp_path, &self.config_path).context("Failed to rename temp file")?;

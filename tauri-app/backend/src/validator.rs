@@ -141,6 +141,7 @@ fn validate_proxies(
             if let Some(proxy_type) = proxy.get("type").and_then(|v| v.as_str()) {
                 let valid_types = [
                     "ss", "ssr", "vmess", "vless", "trojan", "snell", "http", "socks5",
+                    "hysteria", "hysteria2", "tuic", "wireguard",
                 ];
                 if !valid_types.contains(&proxy_type) {
                     warnings.push(format!(

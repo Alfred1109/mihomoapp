@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -19,6 +19,11 @@ import {
   Alert,
   Chip,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 import {
   Save,
@@ -31,46 +36,28 @@ import {
   Code,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { TabPanel } from './common';
+import type { ConfigValue } from '../types';
 
 interface ConfigManagerProps {
   isRunning: boolean;
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`config-tabpanel-${index}`}
-      aria-labelledby={`config-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
-
 const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, showNotification }) => {
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<ConfigValue | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [configText, setConfigText] = useState('');
   const [tabValue, setTabValue] = useState(0);
   const [autostart, setAutostart] = useState(false);
   const [silentStart, setSilentStart] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     setLoading(true);
     try {
-      const configData = await invoke<any>('get_mihomo_config');
+      const configData = await invoke<ConfigValue>('get_mihomo_config');
       setConfig(configData);
       setConfigText(JSON.stringify(configData, null, 2));
       setHasChanges(false);
@@ -79,7 +66,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
 
   const saveConfig = async () => {
     setLoading(true);
@@ -94,11 +81,8 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     }
   };
 
-  const resetConfig = async () => {
-    if (!confirm('确定要恢复默认配置吗？这将覆盖所有当前设置并创建备份。')) {
-      return;
-    }
-
+  const handleResetConfirm = async () => {
+    setResetDialogOpen(false);
     setLoading(true);
     try {
       const result = await invoke<string>('reset_config_to_default');
@@ -111,22 +95,22 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     }
   };
 
-  const updateConfig = (field: string, value: any) => {
+  const updateConfig = (field: string, value: unknown) => {
     if (!config) return;
 
-    const newConfig = { ...config };
+    const newConfig = { ...config } as Record<string, unknown>;
     const fields = field.split('.');
-    let current = newConfig;
+    let current: Record<string, unknown> = newConfig;
 
     for (let i = 0; i < fields.length - 1; i++) {
       if (!current[fields[i]]) {
         current[fields[i]] = {};
       }
-      current = current[fields[i]];
+      current = current[fields[i]] as Record<string, unknown>;
     }
     current[fields[fields.length - 1]] = value;
 
-    setConfig(newConfig);
+    setConfig(newConfig as ConfigValue);
     setHasChanges(true);
   };
 
@@ -180,7 +164,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   useEffect(() => {
     loadConfig();
     loadAppSettings();
-  }, []);
+  }, [loadConfig]);
 
   useEffect(() => {
     if (config) {
@@ -211,7 +195,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
           <Button
             variant="outlined"
             startIcon={<RestoreFromTrash />}
-            onClick={resetConfig}
+            onClick={() => setResetDialogOpen(true)}
             disabled={loading}
             color="warning"
           >
@@ -560,6 +544,21 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
           配置更改将在重启 mihomo 服务后生效。
         </Alert>
       )}
+
+      <Dialog open={resetDialogOpen} onClose={() => setResetDialogOpen(false)}>
+        <DialogTitle>确认恢复默认配置</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            确定要恢复默认配置吗？这将覆盖所有当前设置并创建备份。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetDialogOpen(false)}>取消</Button>
+          <Button onClick={handleResetConfirm} color="warning" variant="contained">
+            确认恢复
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 });

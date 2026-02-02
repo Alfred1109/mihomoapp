@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -37,24 +37,10 @@ import {
 import { invoke } from '@tauri-apps/api/tauri';
 import { save, open } from '@tauri-apps/api/dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
+import { TabPanel } from './common';
 
 interface BackupManagerProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
-}
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div role="tabpanel" hidden={value !== index} {...other}>
-      {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
-    </div>
-  );
 }
 
 const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotification }) => {
@@ -70,11 +56,7 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
   const [subscriptionRestoreDialog, setSubscriptionRestoreDialog] = useState(false);
   const [newLabel, setNewLabel] = useState('');
 
-  useEffect(() => {
-    loadAllBackups();
-  }, []);
-
-  const loadAllBackups = async () => {
+  const loadAllBackups = useCallback(async () => {
     setLoading(true);
     try {
       const [configResult, subResult] = await Promise.all([
@@ -88,7 +70,11 @@ const BackupManager: React.FC<BackupManagerProps> = React.memo(({ showNotificati
     } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
+
+  useEffect(() => {
+    loadAllBackups();
+  }, [loadAllBackups]);
 
   const handleRestoreConfig = async (backupFilename: string) => {
     setLoading(true);

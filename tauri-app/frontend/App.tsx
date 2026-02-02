@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -25,6 +25,7 @@ import ConfigManager from './components/ConfigManager';
 import BackupManager from './components/BackupManager';
 import { TabPanel, ErrorBoundary } from './components/common';
 import { useAppStore } from './store/appStore';
+import { isTauriEnv } from './utils/tauri';
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -55,73 +56,74 @@ function App() {
     setTabValue(newValue);
   };
 
-  const checkMihomoStatus = async () => {
-    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
-      try {
-        const serviceStatus = await invoke<string>('get_mihomo_service_status');
-        const isRunning = serviceStatus === 'running';
-        
-        setMihomoStatus({
-          running: isRunning,
-          processId: null,
-          timestamp: Date.now(),
-        });
-        
-        if (!isRunning) {
-          try {
-            const directStatus = await invoke<boolean>('get_mihomo_status');
-            setMihomoStatus({
-              running: directStatus,
-              processId: null,
-              timestamp: Date.now(),
-            });
-          } catch (e) {
-            console.error('Failed to get direct status:', e);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to get mihomo status:', error);
-      }
-    } else {
-      console.log('Running in browser mode - Tauri API not available');
-    }
-  };
-
-  const showNotification = (message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'info') => {
+  const showNotification = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning' = 'info') => {
     setNotification({ open: true, message, severity });
-  };
+  }, []);
 
-  const handleCloseNotification = () => {
+  const handleCloseNotification = useCallback(() => {
     setNotification(prev => ({ ...prev, open: false }));
-  };
+  }, []);
 
-  const checkAdminPrivileges = async () => {
-    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
-      try {
-        const adminStatus = await invoke<boolean>('check_admin_privileges');
-        setIsAdmin(adminStatus);
-        setAdminCheckDone(true);
-        
-        if (!adminStatus) {
-          showNotification(t('permissions.requiresAdmin'), 'warning');
+  const checkMihomoStatus = useCallback(async () => {
+    if (!isTauriEnv()) {
+      return;
+    }
+    
+    try {
+      const serviceStatus = await invoke<string>('get_mihomo_service_status');
+      const isRunning = serviceStatus === 'running';
+      
+      setMihomoStatus({
+        running: isRunning,
+        processId: null,
+        timestamp: Date.now(),
+      });
+      
+      if (!isRunning) {
+        try {
+          const directStatus = await invoke<boolean>('get_mihomo_status');
+          setMihomoStatus({
+            running: directStatus,
+            processId: null,
+            timestamp: Date.now(),
+          });
+        } catch {
+          // Ignore error
         }
-      } catch (error) {
-        console.error('Failed to check admin privileges:', error);
-        setAdminCheckDone(true);
       }
-    } else {
+    } catch (error) {
+      console.error('Failed to get mihomo status:', error);
+    }
+  }, [setMihomoStatus]);
+
+  const checkAdminPrivileges = useCallback(async () => {
+    if (!isTauriEnv()) {
+      setAdminCheckDone(true);
+      return;
+    }
+    
+    try {
+      const adminStatus = await invoke<boolean>('check_admin_privileges');
+      setIsAdmin(adminStatus);
+      setAdminCheckDone(true);
+      
+      if (!adminStatus) {
+        showNotification(t('permissions.requiresAdmin'), 'warning');
+      }
+    } catch (error) {
+      console.error('Failed to check admin privileges:', error);
       setAdminCheckDone(true);
     }
-  };
+  }, [setIsAdmin, setAdminCheckDone, showNotification, t]);
 
   const handleRestartAsAdmin = async () => {
-    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
-      try {
-        await invoke('restart_as_admin');
-        showNotification(t('notifications.startError'), 'error');
-      } catch (error) {
-        showNotification(`${t('notifications.startError')}: ${error}`, 'error');
-      }
+    if (!isTauriEnv()) return;
+    
+    try {
+      await invoke('restart_as_admin');
+      showNotification(t('notifications.startError'), 'error');
+    } catch (error) {
+      showNotification(`${t('notifications.startError')}: ${error}`, 'error');
     }
   };
 
@@ -147,7 +149,7 @@ function App() {
     return () => {
       cleanupEventListeners();
     };
-  }, []);
+  }, [initEventListeners, cleanupEventListeners, checkMihomoStatus, checkAdminPrivileges]);
 
   return (
     <ErrorBoundary>

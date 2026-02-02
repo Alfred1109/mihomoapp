@@ -42,7 +42,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const listeners: UnlistenFn[] = [];
     
     const unlistenStatus = await listen<MihomoStatusEvent>('mihomo-status', (event) => {
-      console.log('Received mihomo-status event:', event.payload);
       set({
         mihomoStatus: {
           running: event.payload.running,
@@ -53,18 +52,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     listeners.push(unlistenStatus);
     
-    const unlistenConfig = await listen<ConfigChangeEvent>('config-change', (event) => {
-      console.log('Received config-change event:', event.payload);
+    const unlistenConfig = await listen<ConfigChangeEvent>('config-change', (_event) => {
     });
     listeners.push(unlistenConfig);
     
-    const unlistenProxy = await listen<ProxyChangeEvent>('proxy-change', (event) => {
-      console.log('Received proxy-change event:', event.payload);
+    const unlistenProxy = await listen<ProxyChangeEvent>('proxy-change', (_event) => {
     });
     listeners.push(unlistenProxy);
 
-    const unlistenSubscription = await listen<SubscriptionUpdateEvent>('subscription-update', (event) => {
-      console.log('Received subscription-update event:', event.payload);
+    const unlistenSubscription = await listen<SubscriptionUpdateEvent>('subscription-update', (_event) => {
     });
     listeners.push(unlistenSubscription);
     

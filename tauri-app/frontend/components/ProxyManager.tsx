@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -50,6 +50,10 @@ interface ProxyGroup {
   history?: Array<{ name: string; delay: number; time: string }>;
 }
 
+interface ProxiesResponse {
+  proxies: Record<string, ProxyNode | ProxyGroup>;
+}
+
 type SortField = 'name' | 'type' | 'delay' | 'status';
 type SortOrder = 'asc' | 'desc';
 
@@ -62,20 +66,19 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [proxyHistory, setProxyHistory] = useState<Array<{ groupName: string; nodeName: string; time: string }>>([]);
 
-  const extractProxyGroups = (response: any) => {
-    // Extract proxy groups, PROXY组优先
-    // 过滤掉mihomo内置的冗余组和auto组（auto组通过PROXY组选择即可）
+  const extractProxyGroups = (response: ProxiesResponse) => {
     const excludeBuiltinGroups = ['GLOBAL', 'COMPATIBLE', 'PASS', 'DIRECT', 'REJECT', 'REJECT-DROP', 'auto'];
     const proxyGroups: ProxyGroup[] = [];
-    Object.entries(response.proxies || {}).forEach(([name, proxy]: [string, any]) => {
-      if ((proxy.type === 'Selector' || proxy.type === 'URLTest' || proxy.type === 'Fallback' || proxy.type === 'LoadBalance') 
+    Object.entries(response.proxies || {}).forEach(([name, proxy]) => {
+      const proxyData = proxy as ProxyGroup;
+      if ((proxyData.type === 'Selector' || proxyData.type === 'URLTest' || proxyData.type === 'Fallback' || proxyData.type === 'LoadBalance') 
           && !excludeBuiltinGroups.includes(name)) {
         proxyGroups.push({
           name,
-          type: proxy.type,
-          now: proxy.now,
-          all: proxy.all || [],
-          history: proxy.history || []
+          type: proxyData.type,
+          now: proxyData.now,
+          all: proxyData.all || [],
+          history: proxyData.history || []
         });
       }
     });
