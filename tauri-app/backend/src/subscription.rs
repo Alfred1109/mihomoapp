@@ -190,40 +190,11 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
         return Err(anyhow::anyhow!("没有找到任何代理节点"));
     }
 
-    // 使用原子更新防止竞态条件（内部会自动备份）
-    crate::config::update_config(|config| {
-        config["proxies"] = serde_json::json!(all_proxies);
+    let merged_config = crate::base_config::merge_with_proxies(all_proxies, proxy_names).await?;
 
-        // Create or update proxy groups
-        // PROXY group: manual selection with auto, all nodes, and DIRECT
-        let mut proxy_select_list = vec!["auto".to_string(), "DIRECT".to_string()];
-        proxy_select_list.extend(proxy_names.clone());
+    crate::config::save_config(merged_config.clone()).await?;
 
-        // auto group: automatic selection based on latency
-        let proxy_groups = vec![
-            serde_json::json!({
-                "name": "PROXY",
-                "type": "select",
-                "proxies": proxy_select_list
-            }),
-            serde_json::json!({
-                "name": "auto",
-                "type": "url-test",
-                "proxies": proxy_names.clone(),
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": 300,
-                "tolerance": 50
-            }),
-        ];
-
-        config["proxy-groups"] = serde_json::json!(proxy_groups);
-
-        Ok(())
-    }).await?;
-
-    // 验证配置（在更新完成后）
-    let config = crate::config::load_config().await?;
-    match crate::validator::validate_config(&config).await {
+    match crate::validator::validate_config(&merged_config).await {
         Ok(result) => {
             if !result.valid {
                 warn!("⚠ 配置验证失败:");
@@ -247,11 +218,101 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
         }
         Err(e) => {
             warn!("⚠ 配置验证出错: {}", e);
-            // 验证出错不阻止保存，继续执行
         }
     }
 
     Ok(())
+}
+
+pub async fn export_subscriptions() -> Result<String> {
+    let storage = load_subscriptions().await.unwrap_or_default();
+    let json_content = serde_json::to_string_pretty(&storage)
+        .context("序列化订阅数据失败")?;
+    info!("导出 {} 个订阅链接", storage.subscriptions.len());
+    Ok(json_content)
+}
+
+pub async fn import_subscriptions(json_content: &str) -> Result<u32> {
+    let imported_storage: SubscriptionStorage = serde_json::from_str(json_content)
+        .context("解析导入的订阅数据失败")?;
+
+    if imported_storage.subscriptions.is_empty() {
+        return Err(anyhow::anyhow!("导入的数据中没有订阅链接"));
+    }
+
+    let subscriptions_path = get_subscriptions_path()?;
+    if subscriptions_path.exists() {
+        let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+        std::fs::create_dir_all(&backup_dir)?;
+        
+        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_path = backup_dir.join(format!("subscriptions_before_import_{}.json", timestamp));
+        std::fs::copy(&subscriptions_path, &backup_path)?;
+        info!("已备份当前订阅数据");
+    }
+
+    let count = imported_storage.subscriptions.len() as u32;
+    save_subscriptions(&imported_storage).await?;
+    
+    info!("成功导入 {} 个订阅链接", count);
+    Ok(count)
+}
+
+pub async fn backup_subscriptions() -> Result<String> {
+    let subscriptions_path = get_subscriptions_path()?;
+    
+    if !subscriptions_path.exists() {
+        return Err(anyhow::anyhow!("没有订阅数据可备份"));
+    }
+
+    let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+    std::fs::create_dir_all(&backup_dir)?;
+    
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_filename = format!("subscriptions_{}.json", timestamp);
+    let backup_path = backup_dir.join(&backup_filename);
+    
+    std::fs::copy(&subscriptions_path, &backup_path)
+        .context("备份订阅数据失败")?;
+    
+    info!("订阅数据已备份到: {:?}", backup_path);
+    Ok(backup_filename)
+}
+
+pub async fn list_subscription_backups() -> Result<Vec<String>> {
+    let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut backups = Vec::new();
+
+    for entry in std::fs::read_dir(&backup_dir)? {
+        let entry = entry?;
+        let filename = entry.file_name().to_string_lossy().to_string();
+
+        if filename.starts_with("subscriptions_") && filename.ends_with(".json") {
+            backups.push(filename);
+        }
+    }
+
+    backups.sort_by(|a, b| b.cmp(a));
+    Ok(backups)
+}
+
+pub async fn restore_subscriptions_from_backup(backup_filename: &str) -> Result<u32> {
+    let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+    let backup_path = backup_dir.join(backup_filename);
+
+    if !backup_path.exists() {
+        return Err(anyhow::anyhow!("备份文件不存在: {}", backup_filename));
+    }
+
+    let content = std::fs::read_to_string(&backup_path)
+        .context("读取备份文件失败")?;
+
+    import_subscriptions(&content).await
 }
 
 #[allow(dead_code)]

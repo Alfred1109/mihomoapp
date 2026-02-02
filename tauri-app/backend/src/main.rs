@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backup;
+mod base_config;
 mod config;
 mod config_manager;
 mod config_sync;
@@ -1201,15 +1202,96 @@ async fn get_silent_start_status() -> Result<bool, String> {
 
 #[tauri::command]
 async fn reset_config_to_default() -> Result<String, String> {
-    let result = config_sync::ConfigSyncManager::reset_from_template()
+    config::reset_to_default_config()
         .await
-        .map_err(|e| format!("恢复默认配置失败: {}", e))?;
-        
-    if result.success {
-        Ok(format!("恢复默认配置成功，备份已创建: {}", result.backup_created))
-    } else {
-        Err("恢复默认配置失败".to_string())
+        .map_err(|e| format!("恢复默认配置失败: {}", e))
+}
+
+#[tauri::command]
+async fn export_subscriptions() -> Result<String, String> {
+    subscription::export_subscriptions()
+        .await
+        .map_err(|e| format!("导出订阅链接失败: {}", e))
+}
+
+#[tauri::command]
+async fn import_subscriptions(json_content: String) -> Result<u32, String> {
+    subscription::import_subscriptions(&json_content)
+        .await
+        .map_err(|e| format!("导入订阅链接失败: {}", e))
+}
+
+#[tauri::command]
+async fn backup_subscriptions() -> Result<String, String> {
+    subscription::backup_subscriptions()
+        .await
+        .map_err(|e| format!("备份订阅链接失败: {}", e))
+}
+
+#[tauri::command]
+async fn list_subscription_backups() -> Result<Vec<String>, String> {
+    subscription::list_subscription_backups()
+        .await
+        .map_err(|e| format!("获取订阅备份列表失败: {}", e))
+}
+
+#[tauri::command]
+async fn restore_subscriptions_from_backup(backup_filename: String) -> Result<u32, String> {
+    subscription::restore_subscriptions_from_backup(&backup_filename)
+        .await
+        .map_err(|e| format!("恢复订阅链接失败: {}", e))
+}
+
+#[tauri::command]
+async fn export_base_config() -> Result<String, String> {
+    base_config::export_base_config()
+        .await
+        .map_err(|e| format!("导出基础配置失败: {}", e))
+}
+
+#[tauri::command]
+async fn import_base_config(yaml_content: String) -> Result<String, String> {
+    base_config::import_base_config(&yaml_content)
+        .await
+        .map_err(|e| format!("导入基础配置失败: {}", e))?;
+    Ok("基础配置导入成功".to_string())
+}
+
+#[tauri::command]
+async fn get_base_config() -> Result<serde_json::Value, String> {
+    base_config::load_base_config()
+        .await
+        .map_err(|e| format!("加载基础配置失败: {}", e))
+}
+
+#[tauri::command]
+async fn save_base_config(config: serde_json::Value) -> Result<String, String> {
+    base_config::save_base_config(&config)
+        .await
+        .map_err(|e| format!("保存基础配置失败: {}", e))?;
+    Ok("基础配置保存成功".to_string())
+}
+
+#[tauri::command]
+async fn regenerate_runtime_config() -> Result<String, String> {
+    let subscriptions = subscription::get_subscriptions()
+        .await
+        .map_err(|e| format!("获取订阅失败: {}", e))?;
+    
+    let active_ids: Vec<String> = subscriptions.iter()
+        .filter(|s| matches!(s.status, subscription::SubscriptionStatus::Active) && s.proxy_count > 0)
+        .map(|s| s.id.clone())
+        .collect();
+
+    if active_ids.is_empty() {
+        return Err("没有活动的订阅，无法重新生成配置".to_string());
     }
+
+    subscription::generate_config_from_subscriptions(active_ids)
+        .await
+        .map_err(|e| format!("重新生成配置失败: {}", e))?;
+    
+    Ok("运行时配置已重新生成".to_string())
 }
 
 #[tauri::command]
@@ -1394,7 +1476,17 @@ fn main() {
             get_autostart_status,
             set_silent_start,
             get_silent_start_status,
-            reset_config_to_default
+            reset_config_to_default,
+            export_subscriptions,
+            import_subscriptions,
+            backup_subscriptions,
+            list_subscription_backups,
+            restore_subscriptions_from_backup,
+            export_base_config,
+            import_base_config,
+            get_base_config,
+            save_base_config,
+            regenerate_runtime_config
         ])
         .setup(|app| {
             // Initialize application

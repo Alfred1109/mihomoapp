@@ -92,36 +92,89 @@ where
     manager.update_config(updater).await
 }
 
+pub async fn reset_to_default_config() -> Result<String> {
+    tracing::info!("开始重置配置为默认值...");
+    
+    crate::base_config::reset_to_default().await?;
+    
+    let storage = crate::subscription::get_subscriptions().await.unwrap_or_default();
+    let active_subscriptions: Vec<_> = storage.iter()
+        .filter(|s| matches!(s.status, crate::subscription::SubscriptionStatus::Active) && s.proxy_count > 0)
+        .collect();
+
+    if active_subscriptions.is_empty() {
+        let default_config = crate::base_config::create_default_base_config();
+        let mut runtime_config = default_config.clone();
+        runtime_config["proxies"] = serde_json::json!([]);
+        runtime_config["proxy-groups"] = serde_json::json!([]);
+        if let Some(obj) = runtime_config.as_object_mut() {
+            obj.remove("base_config_version");
+        }
+        runtime_config["config_version"] = serde_json::json!(2);
+        save_config(runtime_config).await?;
+        
+        tracing::info!("配置已重置为默认值（无活动订阅）");
+        return Ok("配置已重置为默认值。请添加订阅链接或从备份恢复订阅。".to_string());
+    }
+
+    let subscription_ids: Vec<String> = active_subscriptions.iter()
+        .map(|s| s.id.clone())
+        .collect();
+    
+    match crate::subscription::generate_config_from_subscriptions(subscription_ids).await {
+        Ok(_) => {
+            tracing::info!("配置已重置为默认值并重新生成（使用现有订阅）");
+            Ok("配置已重置为默认值，并使用现有订阅重新生成了运行时配置。".to_string())
+        }
+        Err(e) => {
+            tracing::warn!("重新生成配置失败: {}", e);
+            let default_config = crate::base_config::create_default_base_config();
+            let mut runtime_config = default_config.clone();
+            runtime_config["proxies"] = serde_json::json!([]);
+            runtime_config["proxy-groups"] = serde_json::json!([]);
+            if let Some(obj) = runtime_config.as_object_mut() {
+                obj.remove("base_config_version");
+            }
+            runtime_config["config_version"] = serde_json::json!(2);
+            save_config(runtime_config).await?;
+            
+            Ok(format!("配置已重置为默认值，但重新生成订阅配置失败: {}。请手动更新订阅。", e))
+        }
+    }
+}
+
 pub async fn set_tun_mode(enable: bool) -> Result<()> {
-    let mut config = load_config().await?;
+    let mut base_config = crate::base_config::load_base_config().await?;
 
-    // Ensure tun section exists
-    if config.get("tun").is_none() {
-        config["tun"] = serde_json::json!({});
+    if base_config.get("tun").is_none() {
+        base_config["tun"] = serde_json::json!({});
     }
 
-    config["tun"]["enable"] = serde_json::json!(enable);
+    base_config["tun"]["enable"] = serde_json::json!(enable);
 
-    // Set default TUN settings if enabling
     if enable {
-        if config["tun"]["stack"].is_null() {
-            config["tun"]["stack"] = serde_json::json!("system");
+        if base_config["tun"]["stack"].is_null() {
+            base_config["tun"]["stack"] = serde_json::json!("system");
         }
-        if config["tun"]["auto-route"].is_null() {
-            config["tun"]["auto-route"] = serde_json::json!(true);
+        if base_config["tun"]["auto-route"].is_null() {
+            base_config["tun"]["auto-route"] = serde_json::json!(true);
         }
-        if config["tun"]["auto-detect-interface"].is_null() {
-            config["tun"]["auto-detect-interface"] = serde_json::json!(true);
+        if base_config["tun"]["auto-detect-interface"].is_null() {
+            base_config["tun"]["auto-detect-interface"] = serde_json::json!(true);
         }
-        if config["tun"]["dns-hijack"].is_null() {
-            config["tun"]["dns-hijack"] = serde_json::json!(["any:53"]);
+        if base_config["tun"]["dns-hijack"].is_null() {
+            base_config["tun"]["dns-hijack"] = serde_json::json!(["any:53"]);
         }
-        if config["tun"]["mtu"].is_null() {
-            config["tun"]["mtu"] = serde_json::json!(1500);
+        if base_config["tun"]["mtu"].is_null() {
+            base_config["tun"]["mtu"] = serde_json::json!(1500);
         }
     }
 
-    save_config(config).await
+    crate::base_config::save_base_config(&base_config).await?;
+
+    let mut runtime_config = load_config().await?;
+    runtime_config["tun"] = base_config["tun"].clone();
+    save_config(runtime_config).await
 }
 
 const CONFIG_VERSION: u32 = 2; // 当前配置版本
