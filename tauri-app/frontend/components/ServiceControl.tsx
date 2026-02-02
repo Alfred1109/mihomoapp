@@ -10,6 +10,12 @@ import {
   FormControlLabel,
   Switch,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Alert,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -17,8 +23,10 @@ import {
   Refresh,
   Security,
   AutorenewOutlined,
+  DeleteForever,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 import { isTauriEnv } from '../utils/tauri';
 
 interface ServiceControlProps {
@@ -27,20 +35,30 @@ interface ServiceControlProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
+type ServiceStatus = 'running' | 'stopped' | 'not_installed';
+
 const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, onStatusChange, showNotification }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [serviceStatus, setServiceStatus] = useState<string>('not_installed');
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>('not_installed');
   const [serviceLoading, setServiceLoading] = useState(false);
   const [autoRestart, setAutoRestart] = useState(true);
+  const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
 
   const checkServiceStatus = useCallback(async () => {
     if (!isTauriEnv()) return;
     
     try {
       const status = await invoke<string>('get_mihomo_service_status');
-      setServiceStatus(status);
-    } catch (error) {
-      console.error('Failed to check service status:', error);
+      if (status === 'running') {
+        setServiceStatus('running');
+      } else if (status === 'stopped' || status === 'installed') {
+        setServiceStatus('stopped');
+      } else {
+        setServiceStatus('not_installed');
+      }
+    } catch {
+      setServiceStatus('not_installed');
     }
   }, []);
 
@@ -50,8 +68,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
     try {
       const enabled = await invoke<boolean>('get_auto_restart');
       setAutoRestart(enabled);
-    } catch (error) {
-      console.error('Failed to load auto-restart setting:', error);
+    } catch {
     }
   }, []);
 
@@ -67,12 +84,26 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
     try {
       await invoke('set_auto_restart', { enabled });
       showNotification(
-        enabled ? '已启用进程崩溃自动重启' : '已禁用进程崩溃自动重启',
+        enabled ? t('service.autoRestartEnabled') : t('service.autoRestartDisabled'),
         'success'
       );
     } catch (error) {
-      showNotification(`设置失败: ${error}`, 'error');
+      showNotification(`${t('service.settingFailed')}: ${error}`, 'error');
       setAutoRestart(!enabled);
+    }
+  };
+
+  const handleInstallService = async () => {
+    setServiceLoading(true);
+    try {
+      const result = await invoke<string>('install_mihomo_service');
+      showNotification(result, 'success');
+      await checkServiceStatus();
+      onStatusChange();
+    } catch (error) {
+      showNotification(`${t('service.installFailed')}: ${error}`, 'error');
+    } finally {
+      setServiceLoading(false);
     }
   };
 
@@ -85,7 +116,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
       await checkServiceStatus();
       onStatusChange();
     } catch (error) {
-      showNotification(`启动失败: ${error}`, 'error');
+      showNotification(`${t('service.startFailed')}: ${error}`, 'error');
     } finally {
       setServiceLoading(false);
     }
@@ -100,7 +131,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
       await checkServiceStatus();
       onStatusChange();
     } catch (error) {
-      showNotification(`停止失败: ${error}`, 'error');
+      showNotification(`${t('service.stopFailed')}: ${error}`, 'error');
     } finally {
       setServiceLoading(false);
     }
@@ -112,38 +143,44 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
       const result = await invoke<string>('restart_mihomo_service_cmd');
       await new Promise(resolve => setTimeout(resolve, 2000));
       await checkServiceStatus();
-      showNotification(result || 'Mihomo重启成功，配置已应用', 'success');
+      showNotification(result || t('service.restartSuccess'), 'success');
       onStatusChange();
     } catch (error) {
-      showNotification(`重启失败: ${error}`, 'error');
+      showNotification(`${t('service.restartFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInstallService = async () => {
-    setServiceLoading(true);
-    try {
-      const result = await invoke<string>('install_mihomo_service');
-      showNotification(result, 'success');
-      await checkServiceStatus();
-    } catch (error) {
-      showNotification(`安装失败: ${error}`, 'error');
-    } finally {
-      setServiceLoading(false);
-    }
-  };
-
   const handleUninstallService = async () => {
+    setUninstallDialogOpen(false);
     setServiceLoading(true);
     try {
       const result = await invoke<string>('uninstall_mihomo_service');
       showNotification(result, 'success');
       await checkServiceStatus();
+      onStatusChange();
     } catch (error) {
-      showNotification(`卸载失败: ${error}`, 'error');
+      showNotification(`${t('service.uninstallFailed')}: ${error}`, 'error');
     } finally {
       setServiceLoading(false);
+    }
+  };
+
+  const getStatusLabel = () => {
+    switch (serviceStatus) {
+      case 'running': return t('service.statusRunning');
+      case 'stopped': return t('service.statusStopped');
+      case 'not_installed': return t('service.statusNotInstalled');
+      default: return t('service.statusUnknown');
+    }
+  };
+
+  const getStatusColor = (): 'success' | 'warning' | 'default' => {
+    switch (serviceStatus) {
+      case 'running': return 'success';
+      case 'stopped': return 'warning';
+      default: return 'default';
     }
   };
 
@@ -151,21 +188,13 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
     <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>
-          Mihomo 服务管理
+          {t('service.title')}
         </Typography>
         
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
           <Chip
-            label={`服务状态: ${
-              serviceStatus === 'running' ? '运行中' :
-              serviceStatus === 'stopped' ? '已停止' :
-              serviceStatus === 'installed' ? '已安装' :
-              serviceStatus === 'not_installed' ? '未安装' : '未知'
-            }`}
-            color={
-              serviceStatus === 'running' ? 'success' :
-              serviceStatus === 'installed' ? 'info' : 'default'
-            }
+            label={`${t('service.status')}: ${getStatusLabel()}`}
+            color={getStatusColor()}
             variant="filled"
           />
           {(loading || serviceLoading) && <CircularProgress size={20} />}
@@ -184,13 +213,13 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <AutorenewOutlined fontSize="small" />
                 <Typography variant="body2">
-                  进程崩溃时自动重启 (Watchdog)
+                  {t('service.autoRestart')}
                 </Typography>
               </Box>
             }
           />
           <Typography variant="caption" color="text.secondary" sx={{ ml: 4, display: 'block' }}>
-            启用后，进程意外退出时将在 5 秒内自动重启（最多尝试 5 次/分钟）
+            {t('service.autoRestartDesc')}
           </Typography>
         </Box>
 
@@ -205,11 +234,11 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
               disabled={serviceLoading}
               startIcon={<Security />}
             >
-              安装 Mihomo 服务
+              {t('service.install')}
             </Button>
           )}
 
-          {(serviceStatus === 'installed' || serviceStatus === 'stopped') && (
+          {serviceStatus === 'stopped' && (
             <>
               <Button
                 variant="contained"
@@ -218,16 +247,16 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
                 disabled={serviceLoading}
                 startIcon={<PlayArrow />}
               >
-                启动服务
+                {t('service.start')}
               </Button>
               <Button
                 variant="outlined"
                 color="error"
-                onClick={handleUninstallService}
+                onClick={() => setUninstallDialogOpen(true)}
                 disabled={serviceLoading}
-                startIcon={<Stop />}
+                startIcon={<DeleteForever />}
               >
-                卸载服务
+                {t('service.uninstall')}
               </Button>
             </>
           )}
@@ -241,7 +270,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
                 disabled={serviceLoading || loading}
                 startIcon={<Refresh />}
               >
-                重启服务
+                {t('service.restart')}
               </Button>
               <Button
                 variant="contained"
@@ -250,12 +279,30 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
                 disabled={serviceLoading}
                 startIcon={<Stop />}
               >
-                停止服务
+                {t('service.stop')}
               </Button>
             </>
           )}
         </Box>
       </CardContent>
+
+      <Dialog open={uninstallDialogOpen} onClose={() => setUninstallDialogOpen(false)}>
+        <DialogTitle>{t('service.uninstallConfirmTitle')}</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {t('service.uninstallWarning')}
+          </Alert>
+          <DialogContentText>
+            {t('service.uninstallConfirmDesc')}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUninstallDialogOpen(false)}>{t('common.cancel')}</Button>
+          <Button variant="contained" color="error" onClick={handleUninstallService}>
+            {t('service.confirmUninstall')}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Card>
   );
 });
