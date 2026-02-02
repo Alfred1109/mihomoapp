@@ -85,6 +85,7 @@ impl From<&str> for AppError {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: String,
@@ -93,6 +94,7 @@ pub struct ApiError {
     pub details: Option<serde_json::Value>,
 }
 
+#[allow(dead_code)]
 impl ApiError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -128,4 +130,5 @@ impl std::fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+#[allow(dead_code)]
 pub type ApiResult<T> = Result<T, ApiError>;

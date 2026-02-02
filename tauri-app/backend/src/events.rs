@@ -22,6 +22,7 @@ pub struct ProxyChangeEvent {
     pub timestamp: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SubscriptionUpdateEvent {
     pub subscription_id: String,
@@ -31,6 +32,7 @@ pub struct SubscriptionUpdateEvent {
     pub timestamp: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ErrorEvent {
     pub code: String,
@@ -39,6 +41,7 @@ pub struct ErrorEvent {
     pub timestamp: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct NotificationEvent {
     pub message: String,
@@ -64,18 +67,21 @@ pub fn emit_proxy_change(app: &tauri::AppHandle, event: ProxyChangeEvent) {
     }
 }
 
+#[allow(dead_code)]
 pub fn emit_subscription_update(app: &tauri::AppHandle, event: SubscriptionUpdateEvent) {
     if let Err(e) = app.emit_all("subscription-update", event) {
         warn!("Failed to emit subscription-update event: {}", e);
     }
 }
 
+#[allow(dead_code)]
 pub fn emit_error(app: &tauri::AppHandle, event: ErrorEvent) {
     if let Err(e) = app.emit_all("app-error", event) {
         warn!("Failed to emit app-error event: {}", e);
     }
 }
 
+#[allow(dead_code)]
 pub fn emit_notification(app: &tauri::AppHandle, event: NotificationEvent) {
     if let Err(e) = app.emit_all("app-notification", event) {
         warn!("Failed to emit app-notification event: {}", e);
@@ -89,6 +95,7 @@ pub fn get_current_timestamp() -> u64 {
         .as_secs()
 }
 
+#[allow(dead_code)]
 pub fn create_subscription_update_event(
     id: &str,
     name: &str,
@@ -104,6 +111,7 @@ pub fn create_subscription_update_event(
     }
 }
 
+#[allow(dead_code)]
 pub fn create_error_event(code: &str, message: &str, source: &str) -> ErrorEvent {
     ErrorEvent {
         code: code.to_string(),
@@ -113,6 +121,7 @@ pub fn create_error_event(code: &str, message: &str, source: &str) -> ErrorEvent
     }
 }
 
+#[allow(dead_code)]
 pub fn create_notification_event(message: &str, severity: &str) -> NotificationEvent {
     NotificationEvent {
         message: message.to_string(),

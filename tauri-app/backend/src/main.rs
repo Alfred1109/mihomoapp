@@ -5,8 +5,6 @@ mod backup;
 mod base_config;
 mod config;
 mod config_manager;
-mod config_sync;
-mod config_validator;
 mod error;
 mod events;
 mod mihomo;

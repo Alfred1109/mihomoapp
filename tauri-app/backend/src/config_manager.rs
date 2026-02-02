@@ -35,14 +35,12 @@ impl ConfigManager {
         let content =
             std::fs::read_to_string(&self.config_path).context("Failed to read config file")?;
 
-        // Use yaml-rust which supports multi-document YAML
         let yaml_docs = YamlLoader::load_from_str(&content).context("Failed to parse YAML")?;
 
         if yaml_docs.is_empty() {
             return Err(anyhow::anyhow!("YAML file is empty"));
         }
 
-        // Only use the first document
         let yaml_value = &yaml_docs[0];
         let json_value =
             crate::config::yaml_to_json(yaml_value).context("Failed to convert YAML to JSON")?;
@@ -73,10 +71,8 @@ impl ConfigManager {
 
         let temp_path = self.config_path.with_extension("yaml.tmp");
 
-        // 先写入临时文件
         std::fs::write(&temp_path, yaml_content).context("Failed to write temp file")?;
 
-        // 然后打开文件进行同步和锁定
         {
             use std::fs::OpenOptions;
             let temp_file = OpenOptions::new()
@@ -97,79 +93,6 @@ impl ConfigManager {
 
         info!("Config saved successfully: {:?}", self.config_path);
 
-        Ok(())
-    }
-
-    /// 原子更新配置 - 防止竞态条件
-    pub async fn update_config<F>(&self, updater: F) -> Result<()>
-    where
-        F: FnOnce(&mut serde_json::Value) -> Result<()>,
-    {
-        let _guard = self.lock.write().await;
-
-        // 读取当前配置
-        let mut config = self.read_config_internal().await?;
-        
-        // 应用更新
-        updater(&mut config)?;
-        
-        // 写回配置
-        self.write_config_internal(config).await?;
-        
-        Ok(())
-    }
-
-    // 内部方法，假设已经持有锁
-    async fn read_config_internal(&self) -> Result<serde_json::Value> {
-        if !self.config_path.exists() {
-            return Err(anyhow::anyhow!("Config file does not exist"));
-        }
-
-        let file = File::open(&self.config_path).context("Failed to open config file")?;
-        file.lock_shared().context("Failed to acquire shared lock")?;
-
-        let content = std::fs::read_to_string(&self.config_path).context("Failed to read config file")?;
-        let yaml_docs = YamlLoader::load_from_str(&content).context("Failed to parse YAML")?;
-
-        if yaml_docs.is_empty() {
-            file.unlock().ok();
-            return Err(anyhow::anyhow!("YAML file is empty"));
-        }
-
-        let yaml_value = &yaml_docs[0];
-        let json_value = crate::config::yaml_to_json(yaml_value).context("Failed to convert YAML to JSON")?;
-        
-        file.unlock().ok();
-        Ok(json_value)
-    }
-
-    async fn write_config_internal(&self, config: serde_json::Value) -> Result<()> {
-        self.create_backup().await?;
-
-        let yaml_value: serde_yaml::Value =
-            serde_json::from_value(config).context("Failed to convert from JSON")?;
-
-        let yaml_content =
-            serde_yaml::to_string(&yaml_value).context("Failed to serialize YAML")?;
-
-        let temp_path = self.config_path.with_extension("yaml.tmp");
-        std::fs::write(&temp_path, yaml_content).context("Failed to write temp file")?;
-
-        {
-            use std::fs::OpenOptions;
-            let temp_file = OpenOptions::new()
-                .write(true)
-                .open(&temp_path)
-                .context("Failed to open temp file")?;
-
-            temp_file.lock_exclusive().context("Failed to acquire exclusive lock")?;
-            temp_file.sync_all().context("Failed to sync temp file")?;
-            temp_file.unlock().ok();
-        }
-
-        std::fs::rename(&temp_path, &self.config_path).context("Failed to rename temp file")?;
-        info!("Config saved successfully: {:?}", self.config_path);
-        
         Ok(())
     }
 
