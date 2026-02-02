@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -23,18 +23,29 @@ import {
   LinearProgress,
   FormControlLabel,
   Switch,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  Alert,
 } from '@mui/material';
 import {
   Add,
   Delete,
   Refresh,
-  CloudDownload,
   Link,
   CheckCircle,
   Error,
   Update,
+  Download,
+  Upload,
+  History,
+  Restore,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { save, open } from '@tauri-apps/api/dialog';
+import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
 import { useTranslation } from 'react-i18next';
 
 interface SubscriptionManagerProps {
@@ -59,14 +70,20 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [newSubscription, setNewSubscription] = useState({
     name: '',
     url: '',
     userAgent: 'clash',
     useProxy: false,
   });
+  
+  const [subscriptionBackups, setSubscriptionBackups] = useState<string[]>([]);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
-  const loadSubscriptions = async () => {
+  const loadSubscriptions = useCallback(async () => {
     setLoading(true);
     try {
       const data = await invoke<Subscription[]>('get_subscriptions');
@@ -76,14 +93,21 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
+
+  const loadBackups = useCallback(async () => {
+    try {
+      const result = await invoke<string[]>('list_subscription_backups');
+      setSubscriptionBackups(result);
+    } catch {
+    }
+  }, []);
 
   const handleAddSubscription = async () => {
     if (!newSubscription.name || !newSubscription.url) {
       showNotification('请填写所有必填字段', 'error');
       return;
     }
-
     try {
       await invoke('add_subscription', {
         name: newSubscription.name,
@@ -91,7 +115,6 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
         userAgent: newSubscription.userAgent || null,
         useProxy: newSubscription.useProxy,
       });
-      
       showNotification('订阅添加成功', 'success');
       setDialogOpen(false);
       setNewSubscription({ name: '', url: '', userAgent: 'clash', useProxy: false });
@@ -111,17 +134,82 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     }
   };
 
-  const handleDeleteSubscription = async (id: string, name: string) => {
-    if (!confirm(`确定要删除订阅 "${name}" 吗？`)) {
-      return;
-    }
-
+  const handleDeleteSubscription = async () => {
+    if (!deleteTarget) return;
     try {
-      await invoke('delete_subscription', { id });
+      await invoke('delete_subscription', { id: deleteTarget.id });
       showNotification('订阅删除成功', 'success');
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
       loadSubscriptions();
     } catch (error) {
       showNotification(`删除订阅失败: ${error}`, 'error');
+    }
+  };
+
+  const handleExportSubscriptions = async () => {
+    setLoading(true);
+    try {
+      const content = await invoke<string>('export_subscriptions');
+      const filePath = await save({
+        defaultPath: 'subscriptions.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (filePath) {
+        await writeTextFile(filePath, content);
+        showNotification('订阅导出成功', 'success');
+      }
+    } catch (error) {
+      showNotification(`导出订阅失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportSubscriptions = async () => {
+    setLoading(true);
+    try {
+      const filePath = await open({
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (filePath && typeof filePath === 'string') {
+        const content = await readTextFile(filePath);
+        const count = await invoke<number>('import_subscriptions', { jsonContent: content });
+        showNotification(`成功导入 ${count} 个订阅`, 'success');
+        loadSubscriptions();
+      }
+    } catch (error) {
+      showNotification(`导入订阅失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBackupSubscriptions = async () => {
+    setLoading(true);
+    try {
+      const filename = await invoke<string>('backup_subscriptions');
+      showNotification(`订阅已备份: ${filename}`, 'success');
+      loadBackups();
+    } catch (error) {
+      showNotification(`备份订阅失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestoreSubscriptions = async (backupFilename: string) => {
+    setLoading(true);
+    try {
+      const count = await invoke<number>('restore_subscriptions_from_backup', { backupFilename });
+      showNotification(`成功恢复 ${count} 个订阅`, 'success');
+      setRestoreDialogOpen(false);
+      setSelectedBackup(null);
+      loadSubscriptions();
+    } catch (error) {
+      showNotification(`恢复订阅失败: ${error}`, 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,55 +217,50 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     return new Date(dateStr).toLocaleString();
   };
 
+  const formatBackupName = (filename: string): { date: string; time: string } => {
+    const match = filename.match(/(\d{8})_(\d{6})/);
+    if (match) {
+      const dateStr = match[1];
+      const timeStr = match[2];
+      const date = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+      const time = `${timeStr.slice(0, 2)}:${timeStr.slice(2, 4)}:${timeStr.slice(4, 6)}`;
+      return { date, time };
+    }
+    return { date: '未知', time: '' };
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'Active':
-        return <CheckCircle color="success" />;
-      case 'Error':
-        return <Error color="error" />;
-      case 'Updating':
-        return <Update color="info" />;
-      default:
-        return <CheckCircle color="success" />;
+      case 'Active': return <CheckCircle color="success" />;
+      case 'Error': return <Error color="error" />;
+      case 'Updating': return <Update color="info" />;
+      default: return <CheckCircle color="success" />;
     }
   };
 
   const getStatusColor = (status: string): 'success' | 'error' | 'info' | 'default' => {
     switch (status) {
-      case 'Active':
-        return 'success';
-      case 'Error':
-        return 'error';
-      case 'Updating':
-        return 'info';
-      default:
-        return 'default';
+      case 'Active': return 'success';
+      case 'Error': return 'error';
+      case 'Updating': return 'info';
+      default: return 'default';
     }
   };
 
   useEffect(() => {
     loadSubscriptions();
-  }, []);
+    loadBackups();
+  }, [loadSubscriptions, loadBackups]);
 
   return (
     <Box>
-      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5">{t('subscription.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={<Refresh />}
-            onClick={loadSubscriptions}
-            disabled={loading}
-          >
+          <Button variant="outlined" startIcon={<Refresh />} onClick={loadSubscriptions} disabled={loading}>
             {t('subscription.refresh')}
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => setDialogOpen(true)}
-          >
+          <Button variant="contained" startIcon={<Add />} onClick={() => setDialogOpen(true)}>
             {t('subscription.add')}
           </Button>
         </Box>
@@ -185,18 +268,13 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
 
       {loading && <LinearProgress sx={{ mb: 2 }} />}
 
-      {/* Subscriptions Table */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           {subscriptions.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Link sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                {t('subscription.noSubscriptions')}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                {t('subscription.noSubscriptionsDesc')}
-              </Typography>
+              <Typography variant="h6" gutterBottom>{t('subscription.noSubscriptions')}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>{t('subscription.noSubscriptionsDesc')}</Typography>
               <Button variant="contained" startIcon={<Add />} onClick={() => setDialogOpen(true)}>
                 {t('subscription.add')}
               </Button>
@@ -224,31 +302,15 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            maxWidth: 300,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
+                        <Typography variant="body2" sx={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {subscription.url}
                         </Typography>
                       </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                          <Chip
-                            label={subscription.status}
-                            color={getStatusColor(subscription.status)}
-                            size="small"
-                          />
-                          <Chip
-                            label={subscription.use_proxy ? '使用代理' : '直连'}
-                            size="small"
-                            variant="outlined"
-                            color={subscription.use_proxy ? 'primary' : 'default'}
-                          />
+                          <Chip label={subscription.status} color={getStatusColor(subscription.status)} size="small" />
+                          <Chip label={subscription.use_proxy ? '使用代理' : '直连'} size="small" variant="outlined"
+                            color={subscription.use_proxy ? 'primary' : 'default'} />
                           {subscription.last_error && (
                             <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
                               {subscription.last_error}
@@ -260,19 +322,11 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                       <TableCell>{formatDate(subscription.last_updated)}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleUpdateSubscription(subscription.id)}
-                            title={t('subscription.update')}
-                          >
+                          <IconButton size="small" onClick={() => handleUpdateSubscription(subscription.id)} title={t('subscription.update')}>
                             <Refresh />
                           </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteSubscription(subscription.id, subscription.name)}
-                            title={t('subscription.delete')}
-                            color="error"
-                          >
+                          <IconButton size="small" color="error" title={t('subscription.delete')}
+                            onClick={() => { setDeleteTarget({ id: subscription.id, name: subscription.name }); setDeleteDialogOpen(true); }}>
                             <Delete />
                           </IconButton>
                         </Box>
@@ -286,60 +340,104 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
         </CardContent>
       </Card>
 
-      {/* Add Subscription Dialog */}
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>订阅数据管理</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            导入/导出/备份订阅链接，方便迁移到其他设备。
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
+            <Button variant="outlined" startIcon={<Download />} onClick={handleExportSubscriptions} disabled={loading}>
+              导出订阅
+            </Button>
+            <Button variant="outlined" startIcon={<Upload />} onClick={handleImportSubscriptions} disabled={loading}>
+              导入订阅
+            </Button>
+            <Button variant="contained" startIcon={<History />} onClick={handleBackupSubscriptions} disabled={loading}>
+              创建备份
+            </Button>
+          </Box>
+
+          {subscriptionBackups.length > 0 && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ mb: 2 }}>订阅备份 ({subscriptionBackups.length})</Typography>
+              <List>
+                {subscriptionBackups.slice(0, 5).map((backup, index) => {
+                  const { date, time } = formatBackupName(backup);
+                  const isLatest = index === 0;
+                  return (
+                    <ListItem key={backup} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, mb: 1,
+                      bgcolor: isLatest ? 'action.hover' : 'background.paper' }}>
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="subtitle2">{date} {time}</Typography>
+                            {isLatest && <Chip icon={<CheckCircle />} label="最新" size="small" color="success" />}
+                          </Box>
+                        }
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton size="small" color="primary" title="恢复此备份"
+                          onClick={() => { setSelectedBackup(backup); setRestoreDialogOpen(true); }}>
+                          <Restore fontSize="small" />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                  );
+                })}
+              </List>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{t('subscription.addDialogTitle')}</DialogTitle>
         <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            {t('subscription.addDialogDesc')}
-          </DialogContentText>
-          <TextField
-            autoFocus
-            margin="dense"
-            label={t('subscription.subscriptionName')}
-            fullWidth
-            variant="outlined"
-            value={newSubscription.name}
-            onChange={(e) => setNewSubscription({ ...newSubscription, name: e.target.value })}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            margin="dense"
-            label={t('subscription.subscriptionUrl')}
-            fullWidth
-            variant="outlined"
-            value={newSubscription.url}
-            onChange={(e) => setNewSubscription({ ...newSubscription, url: e.target.value })}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            margin="dense"
-            label={t('subscription.userAgent')}
-            fullWidth
-            variant="outlined"
-            value={newSubscription.userAgent}
-            onChange={(e) => setNewSubscription({ ...newSubscription, userAgent: e.target.value })}
-            sx={{ mb: 2 }}
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={newSubscription.useProxy}
-                onChange={(e) => setNewSubscription({ ...newSubscription, useProxy: e.target.checked })}
-                color="primary"
-              />
-            }
-            label={t('subscription.useProxy')}
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            {t('subscription.useProxyDesc')}
-          </Typography>
+          <DialogContentText sx={{ mb: 2 }}>{t('subscription.addDialogDesc')}</DialogContentText>
+          <TextField autoFocus margin="dense" label={t('subscription.subscriptionName')} fullWidth variant="outlined"
+            value={newSubscription.name} onChange={(e) => setNewSubscription({ ...newSubscription, name: e.target.value })} sx={{ mb: 2 }} />
+          <TextField margin="dense" label={t('subscription.subscriptionUrl')} fullWidth variant="outlined"
+            value={newSubscription.url} onChange={(e) => setNewSubscription({ ...newSubscription, url: e.target.value })} sx={{ mb: 2 }} />
+          <TextField margin="dense" label={t('subscription.userAgent')} fullWidth variant="outlined"
+            value={newSubscription.userAgent} onChange={(e) => setNewSubscription({ ...newSubscription, userAgent: e.target.value })} sx={{ mb: 2 }} />
+          <FormControlLabel control={<Switch checked={newSubscription.useProxy}
+            onChange={(e) => setNewSubscription({ ...newSubscription, useProxy: e.target.checked })} color="primary" />}
+            label={t('subscription.useProxy')} />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{t('subscription.useProxyDesc')}</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>{t('subscription.cancel')}</Button>
-          <Button onClick={handleAddSubscription} variant="contained">
-            {t('subscription.add')}
-          </Button>
+          <Button onClick={handleAddSubscription} variant="contained">{t('subscription.add')}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>确认删除订阅</DialogTitle>
+        <DialogContent>
+          <DialogContentText>确定要删除订阅 "{deleteTarget?.name}" 吗？此操作无法撤销。</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteSubscription}>确认删除</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={restoreDialogOpen} onClose={() => setRestoreDialogOpen(false)}>
+        <DialogTitle>确认恢复订阅</DialogTitle>
+        <DialogContent>
+          <DialogContentText>确定要恢复此订阅备份吗？</DialogContentText>
+          {selectedBackup && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="body2">{formatBackupName(selectedBackup).date} {formatBackupName(selectedBackup).time}</Typography>
+            </Box>
+          )}
+          <Alert severity="info" sx={{ mt: 2 }}>恢复后请手动更新订阅以获取最新的代理节点。</Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRestoreDialogOpen(false)}>取消</Button>
+          <Button variant="contained" onClick={() => selectedBackup && handleRestoreSubscriptions(selectedBackup)}>确认恢复</Button>
         </DialogActions>
       </Dialog>
     </Box>

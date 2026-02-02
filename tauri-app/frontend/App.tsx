@@ -22,7 +22,6 @@ import Dashboard from './components/Dashboard';
 import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
 import ConfigManager from './components/ConfigManager';
-import BackupManager from './components/BackupManager';
 import { TabPanel, ErrorBoundary } from './components/common';
 import { useAppStore } from './store/appStore';
 import { isTauriEnv } from './utils/tauri';
@@ -234,7 +233,6 @@ function App() {
               <Tab label={t('app.subscription')} />
               <Tab label={t('app.proxy')} />
               <Tab label={t('app.config')} />
-              <Tab label={t('app.backup')} />
             </Tabs>
           </Box>
 
@@ -269,12 +267,6 @@ function App() {
                 isRunning={mihomoStatus.running}
                 showNotification={showNotification}
               />
-            </ErrorBoundary>
-          </TabPanel>
-
-          <TabPanel value={tabValue} index={4}>
-            <ErrorBoundary>
-              <BackupManager showNotification={showNotification} />
             </ErrorBoundary>
           </TabPanel>
         </Container>
