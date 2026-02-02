@@ -23,29 +23,8 @@ import SubscriptionManager from './components/SubscriptionManager';
 import ProxyManager from './components/ProxyManager';
 import ConfigManager from './components/ConfigManager';
 import BackupManager from './components/BackupManager';
+import { TabPanel, ErrorBoundary } from './components/common';
 import { useAppStore } from './store/appStore';
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`simple-tabpanel-${index}`}
-      aria-labelledby={`simple-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -61,21 +40,27 @@ function App() {
     severity: 'info',
   });
 
-  // 使用 Zustand store
-  const { mihomoStatus, isAdmin, adminCheckDone, setIsAdmin, setAdminCheckDone, setMihomoStatus, initEventListeners } = useAppStore();
+  const { 
+    mihomoStatus, 
+    isAdmin, 
+    adminCheckDone, 
+    setIsAdmin, 
+    setAdminCheckDone, 
+    setMihomoStatus, 
+    initEventListeners,
+    cleanupEventListeners 
+  } = useAppStore();
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
   const checkMihomoStatus = async () => {
-    // 初始状态检查（仅在启动时执行一次）
-    if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
+    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
       try {
         const serviceStatus = await invoke<string>('get_mihomo_service_status');
         const isRunning = serviceStatus === 'running';
         
-        // 更新 Zustand store
         setMihomoStatus({
           running: isRunning,
           processId: null,
@@ -83,7 +68,6 @@ function App() {
         });
         
         if (!isRunning) {
-          // Fallback to direct process status
           try {
             const directStatus = await invoke<boolean>('get_mihomo_status');
             setMihomoStatus({
@@ -108,18 +92,18 @@ function App() {
   };
 
   const handleCloseNotification = () => {
-    setNotification({ ...notification, open: false });
+    setNotification(prev => ({ ...prev, open: false }));
   };
 
   const checkAdminPrivileges = async () => {
-    if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
+    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
       try {
         const adminStatus = await invoke<boolean>('check_admin_privileges');
         setIsAdmin(adminStatus);
         setAdminCheckDone(true);
         
         if (!adminStatus) {
-          showNotification('应用未以 root 权限运行，某些功能可能受限', 'warning');
+          showNotification(t('permissions.requiresAdmin'), 'warning');
         }
       } catch (error) {
         console.error('Failed to check admin privileges:', error);
@@ -131,12 +115,12 @@ function App() {
   };
 
   const handleRestartAsAdmin = async () => {
-    if (typeof window !== 'undefined' && (window as any).__TAURI_IPC__) {
+    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_IPC__: unknown }).__TAURI_IPC__) {
       try {
         await invoke('restart_as_admin');
-        showNotification('重启失败，请手动使用 sudo 运行应用', 'error');
+        showNotification(t('notifications.startError'), 'error');
       } catch (error) {
-        showNotification(`重启失败: ${error}`, 'error');
+        showNotification(`${t('notifications.startError')}: ${error}`, 'error');
       }
     }
   };
@@ -156,146 +140,159 @@ function App() {
   };
 
   useEffect(() => {
-    // 初始化事件监听器
     initEventListeners();
-    
-    // 初始状态检查
     checkMihomoStatus();
     checkAdminPrivileges();
+
+    return () => {
+      cleanupEventListeners();
+    };
   }, []);
 
   return (
-    <Box sx={{ flexGrow: 1 }}>
-      <AppBar position="static" elevation={0}>
-        <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            {t('app.title')}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <IconButton
-              color="inherit"
-              onClick={handleLanguageMenuOpen}
-              size="small"
-              title="Language"
-            >
-              <Language />
-            </IconButton>
-            <Menu
-              anchorEl={langMenuAnchor}
-              open={Boolean(langMenuAnchor)}
-              onClose={handleLanguageMenuClose}
-            >
-              <MenuItem onClick={() => handleLanguageChange('en')} selected={i18n.language === 'en'}>
-                English
-              </MenuItem>
-              <MenuItem onClick={() => handleLanguageChange('zh')} selected={i18n.language === 'zh'}>
-                中文
-              </MenuItem>
-            </Menu>
-            {adminCheckDone && (
-              <Chip
-                label={isAdmin ? 'Root 权限' : '普通权限'}
-                color={isAdmin ? 'success' : 'warning'}
+    <ErrorBoundary>
+      <Box sx={{ flexGrow: 1 }}>
+        <AppBar position="static" elevation={0}>
+          <Toolbar>
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              {t('app.title')}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <IconButton
+                color="inherit"
+                onClick={handleLanguageMenuOpen}
                 size="small"
-                variant="filled"
-              />
-            )}
-            {adminCheckDone && !isAdmin && (
-              <Button
-                variant="outlined"
-                size="small"
-                color="warning"
-                onClick={handleRestartAsAdmin}
-                sx={{ color: 'white', borderColor: 'white' }}
+                title="Language"
               >
-                以 Root 权限重启
-              </Button>
-            )}
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                px: 2,
-                py: 0.5,
-                borderRadius: 1,
-                backgroundColor: mihomoStatus.running ? 'success.main' : 'error.main',
-                color: 'white',
-              }}
-            >
+                <Language />
+              </IconButton>
+              <Menu
+                anchorEl={langMenuAnchor}
+                open={Boolean(langMenuAnchor)}
+                onClose={handleLanguageMenuClose}
+              >
+                <MenuItem onClick={() => handleLanguageChange('en')} selected={i18n.language === 'en'}>
+                  English
+                </MenuItem>
+                <MenuItem onClick={() => handleLanguageChange('zh')} selected={i18n.language === 'zh'}>
+                  中文
+                </MenuItem>
+              </Menu>
+              {adminCheckDone && (
+                <Chip
+                  label={isAdmin ? t('permissions.admin') : t('permissions.normal')}
+                  color={isAdmin ? 'success' : 'warning'}
+                  size="small"
+                  variant="filled"
+                />
+              )}
+              {adminCheckDone && !isAdmin && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  color="warning"
+                  onClick={handleRestartAsAdmin}
+                  sx={{ color: 'white', borderColor: 'white' }}
+                >
+                  {t('permissions.restartAsAdmin')}
+                </Button>
+              )}
               <Box
                 sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: 'currentColor',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  px: 2,
+                  py: 0.5,
+                  borderRadius: 1,
+                  backgroundColor: mihomoStatus.running ? 'success.main' : 'error.main',
+                  color: 'white',
                 }}
-              />
-              <Typography variant="body2">
-                {mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}
-              </Typography>
+              >
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: 'currentColor',
+                  }}
+                />
+                <Typography variant="body2">
+                  {mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}
+                </Typography>
+              </Box>
             </Box>
+          </Toolbar>
+        </AppBar>
+
+        <Container maxWidth="xl" sx={{ mt: 2 }}>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Tabs value={tabValue} onChange={handleTabChange} aria-label="mihomo manager tabs">
+              <Tab label={t('app.dashboard')} />
+              <Tab label={t('app.subscription')} />
+              <Tab label={t('app.proxy')} />
+              <Tab label={t('app.config')} />
+              <Tab label={t('app.backup')} />
+            </Tabs>
           </Box>
-        </Toolbar>
-      </AppBar>
 
-      <Container maxWidth="xl" sx={{ mt: 2 }}>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tabValue} onChange={handleTabChange} aria-label="mihomo manager tabs">
-            <Tab label={t('app.dashboard')} />
-            <Tab label={t('app.subscription')} />
-            <Tab label={t('app.proxy')} />
-            <Tab label={t('app.config')} />
-            <Tab label="备份管理" />
-          </Tabs>
-        </Box>
+          <TabPanel value={tabValue} index={0}>
+            <ErrorBoundary>
+              <Dashboard 
+                isRunning={mihomoStatus.running}
+                onStatusChange={checkMihomoStatus}
+                showNotification={showNotification}
+              />
+            </ErrorBoundary>
+          </TabPanel>
 
-        <TabPanel value={tabValue} index={0}>
-          <Dashboard 
-            isRunning={mihomoStatus.running}
-            onStatusChange={() => {}}
-            showNotification={showNotification}
-          />
-        </TabPanel>
+          <TabPanel value={tabValue} index={1}>
+            <ErrorBoundary>
+              <SubscriptionManager showNotification={showNotification} />
+            </ErrorBoundary>
+          </TabPanel>
 
-        <TabPanel value={tabValue} index={1}>
-          <SubscriptionManager showNotification={showNotification} />
-        </TabPanel>
+          <TabPanel value={tabValue} index={2}>
+            <ErrorBoundary>
+              <ProxyManager 
+                isRunning={mihomoStatus.running}
+                showNotification={showNotification}
+              />
+            </ErrorBoundary>
+          </TabPanel>
 
-        <TabPanel value={tabValue} index={2}>
-          <ProxyManager 
-            isRunning={mihomoStatus.running}
-            showNotification={showNotification}
-          />
-        </TabPanel>
+          <TabPanel value={tabValue} index={3}>
+            <ErrorBoundary>
+              <ConfigManager 
+                isRunning={mihomoStatus.running}
+                showNotification={showNotification}
+              />
+            </ErrorBoundary>
+          </TabPanel>
 
-        <TabPanel value={tabValue} index={3}>
-          <ConfigManager 
-            isRunning={mihomoStatus.running}
-            showNotification={showNotification}
-          />
-        </TabPanel>
+          <TabPanel value={tabValue} index={4}>
+            <ErrorBoundary>
+              <BackupManager showNotification={showNotification} />
+            </ErrorBoundary>
+          </TabPanel>
+        </Container>
 
-        <TabPanel value={tabValue} index={4}>
-          <BackupManager showNotification={showNotification} />
-        </TabPanel>
-      </Container>
-
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={handleCloseNotification}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert 
-          onClose={handleCloseNotification} 
-          severity={notification.severity}
-          variant="filled"
+        <Snackbar
+          open={notification.open}
+          autoHideDuration={6000}
+          onClose={handleCloseNotification}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         >
-          {notification.message}
-        </Alert>
-      </Snackbar>
-    </Box>
+          <Alert 
+            onClose={handleCloseNotification} 
+            severity={notification.severity}
+            variant="filled"
+          >
+            {notification.message}
+          </Alert>
+        </Snackbar>
+      </Box>
+    </ErrorBoundary>
   );
 }
 
