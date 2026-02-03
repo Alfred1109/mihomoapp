@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, IconButton, Typography } from '@mui/material';
-import { Minimize, CropSquare, Close, Remove } from '@mui/icons-material';
+import { CropSquare, Close, Remove } from '@mui/icons-material';
 import { appWindow } from '@tauri-apps/api/window';
 
 interface TitleBarProps {
@@ -11,7 +11,7 @@ interface TitleBarProps {
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children }) => {
   const handleMinimize = () => appWindow.minimize();
   const handleMaximize = () => appWindow.toggleMaximize();
-  const handleClose = () => appWindow.close();
+  const handleClose = () => appWindow.hide(); // 最小化到托盘而不是退出
 
   return (
     <Box
