@@ -50,6 +50,7 @@ import {
 import { invoke } from '@tauri-apps/api/tauri';
 import { save, open } from '@tauri-apps/api/dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
+import { useTranslation } from 'react-i18next';
 import { TabPanel } from './common';
 import type { ConfigValue } from '../types';
 
@@ -59,6 +60,7 @@ interface ConfigManagerProps {
 }
 
 const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, showNotification }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<ConfigValue | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -83,30 +85,30 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       setConfigText(JSON.stringify(configData, null, 2));
       setHasChanges(false);
     } catch (error) {
-      showNotification(`加载配置失败: ${error}`, 'error');
+      showNotification(`${t('config.loadFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [showNotification]);
+  }, [showNotification, t]);
 
   const loadBackups = useCallback(async () => {
     try {
       const result = await invoke<string[]>('list_config_backups');
       setConfigBackups(result);
     } catch (error) {
-      showNotification(`加载备份列表失败: ${error}`, 'error');
+      showNotification(`${t('config.loadBackupsFailed')}: ${error}`, 'error');
     }
-  }, [showNotification]);
+  }, [showNotification, t]);
 
   const saveConfig = async () => {
     setLoading(true);
     try {
       await invoke('save_mihomo_config', { config });
       setHasChanges(false);
-      showNotification('配置保存成功', 'success');
+      showNotification(t('config.saveSuccess'), 'success');
       await loadBackups();
     } catch (error) {
-      showNotification(`保存配置失败: ${error}`, 'error');
+      showNotification(`${t('config.saveFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       await loadBackups();
       showNotification(result, 'success');
     } catch (error) {
-      showNotification(`恢复默认配置失败: ${error}`, 'error');
+      showNotification(`${t('config.resetFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -130,13 +132,13 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   const handleRestoreBackup = async (backupFilename: string) => {
     setLoading(true);
     try {
-      const result = await invoke<string>('restore_config_backup', { backupFilename });
+      const result = await invoke<string>('restore_config_backup', { backup_filename: backupFilename });
       await loadConfig();
       showNotification(result, 'success');
       setConfirmDialog(false);
       setSelectedBackup(null);
     } catch (error) {
-      showNotification(`恢复备份失败: ${error}`, 'error');
+      showNotification(`${t('config.restoreFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -145,13 +147,13 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   const handleDeleteBackup = async (backupFilename: string) => {
     setLoading(true);
     try {
-      const result = await invoke<string>('delete_config_backup', { backupFilename });
+      const result = await invoke<string>('delete_config_backup', { backup_filename: backupFilename });
       showNotification(result, 'success');
       setDeleteDialog(false);
       setSelectedBackup(null);
       await loadBackups();
     } catch (error) {
-      showNotification(`删除备份失败: ${error}`, 'error');
+      showNotification(`${t('config.deleteFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -159,19 +161,19 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
 
   const handleRenameBackup = async (oldFilename: string, label: string) => {
     if (!label.trim()) {
-      showNotification('标签不能为空', 'warning');
+      showNotification(t('config.labelEmpty'), 'warning');
       return;
     }
     setLoading(true);
     try {
-      await invoke<string>('rename_config_backup', { oldFilename, newLabel: label });
-      showNotification('备份已重命名', 'success');
+      await invoke<string>('rename_config_backup', { old_filename: oldFilename, new_label: label });
+      showNotification(t('config.renameSuccess'), 'success');
       setEditDialog(false);
       setSelectedBackup(null);
       setNewLabel('');
       await loadBackups();
     } catch (error) {
-      showNotification(`重命名备份失败: ${error}`, 'error');
+      showNotification(`${t('config.renameFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -187,10 +189,10 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       });
       if (filePath) {
         await writeTextFile(filePath, content);
-        showNotification('配置导出成功', 'success');
+        showNotification(t('config.exportSuccess'), 'success');
       }
     } catch (error) {
-      showNotification(`导出配置失败: ${error}`, 'error');
+      showNotification(`${t('config.exportFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -204,12 +206,12 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       });
       if (filePath && typeof filePath === 'string') {
         const content = await readTextFile(filePath);
-        await invoke<string>('import_base_config', { yamlContent: content });
+        await invoke<string>('import_base_config', { yaml_content: content });
         await loadConfig();
-        showNotification('配置导入成功', 'success');
+        showNotification(t('config.importSuccess'), 'success');
       }
     } catch (error) {
-      showNotification(`导入配置失败: ${error}`, 'error');
+      showNotification(`${t('config.importFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -243,9 +245,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       const parsedConfig = JSON.parse(configText);
       setConfig(parsedConfig);
       setHasChanges(true);
-      showNotification('已从文本编辑器加载配置', 'success');
+      showNotification(t('config.loadedFromEditor'), 'success');
     } catch {
-      showNotification('文本编辑器中的JSON格式无效', 'error');
+      showNotification(t('config.invalidJson'), 'error');
     }
   };
 
@@ -263,9 +265,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     try {
       await invoke('set_autostart', { enable: checked });
       setAutostart(checked);
-      showNotification(checked ? '已启用开机自启' : '已取消开机自启', 'success');
+      showNotification(checked ? t('config.autostartEnabled') : t('config.autostartDisabled'), 'success');
     } catch (error) {
-      showNotification(`设置开机自启失败: ${error}`, 'error');
+      showNotification(`${t('config.autostartFailed')}: ${error}`, 'error');
     }
   };
 
@@ -273,9 +275,9 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     try {
       await invoke('set_silent_start', { enable: checked });
       setSilentStart(checked);
-      showNotification(checked ? '已启用静默启动' : '已取消静默启动', 'success');
+      showNotification(checked ? t('config.silentStartEnabled') : t('config.silentStartDisabled'), 'success');
     } catch (error) {
-      showNotification(`设置静默启动失败: ${error}`, 'error');
+      showNotification(`${t('config.silentStartFailed')}: ${error}`, 'error');
     }
   };
 

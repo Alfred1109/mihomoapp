@@ -48,21 +48,10 @@ import { save, open } from '@tauri-apps/api/dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
 import { useTranslation } from 'react-i18next';
 
+import type { Subscription } from '../types';
+
 interface SubscriptionManagerProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
-}
-
-interface Subscription {
-  id: string;
-  name: string;
-  url: string;
-  user_agent?: string;
-  use_proxy: boolean;
-  created_at: string;
-  last_updated: string;
-  proxy_count: number;
-  status: 'Active' | 'Error' | 'Updating';
-  last_error?: string;
 }
 
 const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ showNotification }) => {
@@ -89,11 +78,11 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       const data = await invoke<Subscription[]>('get_subscriptions');
       setSubscriptions(data);
     } catch (error) {
-      showNotification(`加载订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.loadFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
-  }, [showNotification]);
+  }, [showNotification, t]);
 
   const loadBackups = useCallback(async () => {
     try {
@@ -105,32 +94,32 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
 
   const handleAddSubscription = async () => {
     if (!newSubscription.name || !newSubscription.url) {
-      showNotification('请填写所有必填字段', 'error');
+      showNotification(t('subscription.fillRequired'), 'error');
       return;
     }
     try {
       await invoke('add_subscription', {
         name: newSubscription.name,
         url: newSubscription.url,
-        userAgent: newSubscription.userAgent || null,
-        useProxy: newSubscription.useProxy,
+        user_agent: newSubscription.userAgent || null,
+        use_proxy: newSubscription.useProxy,
       });
-      showNotification('订阅添加成功', 'success');
+      showNotification(t('subscription.addSuccess'), 'success');
       setDialogOpen(false);
       setNewSubscription({ name: '', url: '', userAgent: 'clash', useProxy: false });
       loadSubscriptions();
     } catch (error) {
-      showNotification(`添加订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.addFailed')}: ${error}`, 'error');
     }
   };
 
   const handleUpdateSubscription = async (id: string) => {
     try {
       await invoke('update_subscription', { id });
-      showNotification('订阅更新成功！配置文件已生成。如果服务正在运行，请重启以应用更改。', 'success');
+      showNotification(t('subscription.updateSuccess'), 'success');
       loadSubscriptions();
     } catch (error) {
-      showNotification(`更新订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.updateFailed')}: ${error}`, 'error');
     }
   };
 
@@ -138,12 +127,12 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     if (!deleteTarget) return;
     try {
       await invoke('delete_subscription', { id: deleteTarget.id });
-      showNotification('订阅删除成功', 'success');
+      showNotification(t('subscription.deleteSuccess'), 'success');
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
       loadSubscriptions();
     } catch (error) {
-      showNotification(`删除订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.deleteFailed')}: ${error}`, 'error');
     }
   };
 
@@ -157,10 +146,10 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       });
       if (filePath) {
         await writeTextFile(filePath, content);
-        showNotification('订阅导出成功', 'success');
+        showNotification(t('subscription.exportSuccess'), 'success');
       }
     } catch (error) {
-      showNotification(`导出订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.exportFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -174,12 +163,12 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       });
       if (filePath && typeof filePath === 'string') {
         const content = await readTextFile(filePath);
-        const count = await invoke<number>('import_subscriptions', { jsonContent: content });
-        showNotification(`成功导入 ${count} 个订阅`, 'success');
+        const count = await invoke<number>('import_subscriptions', { json_content: content });
+        showNotification(t('subscription.importSuccess', { count }), 'success');
         loadSubscriptions();
       }
     } catch (error) {
-      showNotification(`导入订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.importFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -189,10 +178,10 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     setLoading(true);
     try {
       const filename = await invoke<string>('backup_subscriptions');
-      showNotification(`订阅已备份: ${filename}`, 'success');
+      showNotification(`${t('subscription.backupSuccess')}: ${filename}`, 'success');
       loadBackups();
     } catch (error) {
-      showNotification(`备份订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.backupFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -201,13 +190,13 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
   const handleRestoreSubscriptions = async (backupFilename: string) => {
     setLoading(true);
     try {
-      const count = await invoke<number>('restore_subscriptions_from_backup', { backupFilename });
-      showNotification(`成功恢复 ${count} 个订阅`, 'success');
+      const count = await invoke<number>('restore_subscriptions_from_backup', { backup_filename: backupFilename });
+      showNotification(t('subscription.restoreSuccess', { count }), 'success');
       setRestoreDialogOpen(false);
       setSelectedBackup(null);
       loadSubscriptions();
     } catch (error) {
-      showNotification(`恢复订阅失败: ${error}`, 'error');
+      showNotification(`${t('subscription.restoreFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -309,7 +298,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                       <TableCell>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                           <Chip label={subscription.status} color={getStatusColor(subscription.status)} size="small" />
-                          <Chip label={subscription.use_proxy ? '使用代理' : '直连'} size="small" variant="outlined"
+                          <Chip label={subscription.use_proxy ? t('subscription.useProxyLabel') : t('subscription.directLabel')} size="small" variant="outlined"
                             color={subscription.use_proxy ? 'primary' : 'default'} />
                           {subscription.last_error && (
                             <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
@@ -342,26 +331,26 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
 
       <Card>
         <CardContent>
-          <Typography variant="h6" gutterBottom>订阅数据管理</Typography>
+          <Typography variant="h6" gutterBottom>{t('subscription.dataManagement')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            导入/导出/备份订阅链接，方便迁移到其他设备。
+            {t('subscription.dataManagementDesc')}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
             <Button variant="outlined" startIcon={<Download />} onClick={handleExportSubscriptions} disabled={loading}>
-              导出订阅
+              {t('subscription.export')}
             </Button>
             <Button variant="outlined" startIcon={<Upload />} onClick={handleImportSubscriptions} disabled={loading}>
-              导入订阅
+              {t('subscription.import')}
             </Button>
             <Button variant="contained" startIcon={<History />} onClick={handleBackupSubscriptions} disabled={loading}>
-              创建备份
+              {t('subscription.createBackup')}
             </Button>
           </Box>
 
           {subscriptionBackups.length > 0 && (
             <>
               <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle1" sx={{ mb: 2 }}>订阅备份 ({subscriptionBackups.length})</Typography>
+              <Typography variant="subtitle1" sx={{ mb: 2 }}>{t('subscription.backups')} ({subscriptionBackups.length})</Typography>
               <List>
                 {subscriptionBackups.slice(0, 5).map((backup, index) => {
                   const { date, time } = formatBackupName(backup);
@@ -373,12 +362,12 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                         primary={
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Typography variant="subtitle2">{date} {time}</Typography>
-                            {isLatest && <Chip icon={<CheckCircle />} label="最新" size="small" color="success" />}
+                            {isLatest && <Chip icon={<CheckCircle />} label={t('subscription.latest')} size="small" color="success" />}
                           </Box>
                         }
                       />
                       <ListItemSecondaryAction>
-                        <IconButton size="small" color="primary" title="恢复此备份"
+                        <IconButton size="small" color="primary" title={t('subscription.restoreThis')}
                           onClick={() => { setSelectedBackup(backup); setRestoreDialogOpen(true); }}>
                           <Restore fontSize="small" />
                         </IconButton>
@@ -414,30 +403,30 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       </Dialog>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>确认删除订阅</DialogTitle>
+        <DialogTitle>{t('subscription.confirmDelete')}</DialogTitle>
         <DialogContent>
-          <DialogContentText>确定要删除订阅 "{deleteTarget?.name}" 吗？此操作无法撤销。</DialogContentText>
+          <DialogContentText>{t('subscription.confirmDeleteDesc', { name: deleteTarget?.name })}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
-          <Button variant="contained" color="error" onClick={handleDeleteSubscription}>确认删除</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteSubscription}>{t('common.confirm')}</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={restoreDialogOpen} onClose={() => setRestoreDialogOpen(false)}>
-        <DialogTitle>确认恢复订阅</DialogTitle>
+        <DialogTitle>{t('subscription.confirmRestore')}</DialogTitle>
         <DialogContent>
-          <DialogContentText>确定要恢复此订阅备份吗？</DialogContentText>
+          <DialogContentText>{t('subscription.confirmRestoreDesc')}</DialogContentText>
           {selectedBackup && (
             <Box sx={{ mt: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
               <Typography variant="body2">{formatBackupName(selectedBackup).date} {formatBackupName(selectedBackup).time}</Typography>
             </Box>
           )}
-          <Alert severity="info" sx={{ mt: 2 }}>恢复后请手动更新订阅以获取最新的代理节点。</Alert>
+          <Alert severity="info" sx={{ mt: 2 }}>{t('subscription.restoreNote')}</Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRestoreDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={() => selectedBackup && handleRestoreSubscriptions(selectedBackup)}>确认恢复</Button>
+          <Button onClick={() => setRestoreDialogOpen(false)}>{t('common.cancel')}</Button>
+          <Button variant="contained" onClick={() => selectedBackup && handleRestoreSubscriptions(selectedBackup)}>{t('common.confirm')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

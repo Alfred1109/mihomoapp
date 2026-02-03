@@ -21,7 +21,15 @@ import {
   Warning,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 import { isTauriEnv } from '../utils/tauri';
+import type { IPInfo } from '../types';
+
+interface ExtendedIPInfo extends IPInfo {
+  proxy_status?: 'proxied' | 'direct';
+  country_code?: string;
+  stale?: boolean;
+}
 
 interface IPInfoCardProps {
   isRunning: boolean;
@@ -29,7 +37,8 @@ interface IPInfoCardProps {
 }
 
 const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotification }) => {
-  const [ipInfo, setIpInfo] = useState<any>(null);
+  const { t } = useTranslation();
+  const [ipInfo, setIpInfo] = useState<ExtendedIPInfo | null>(null);
   const [ipLoading, setIpLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -68,38 +77,33 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
     setLoadError(null);
     
     try {
-      const data = await invoke<any>('get_current_ip');
+      const data = await invoke<ExtendedIPInfo>('get_current_ip');
       setIpInfo(data);
       setRetryCount(0);
       localStorage.setItem('ipInfo', JSON.stringify(data));
       localStorage.setItem('ipInfoTime', Date.now().toString());
       
-      // 检查代理状态并给用户反馈
       if (isRunning && data.proxy_status === 'direct') {
-        showNotification('警告：检测到IP为直连状态，代理可能未生效。请检查TUN模式是否已启用并重启服务。', 'warning');
+        showNotification(t('ipInfo.proxyNotWorking'), 'warning');
       }
-    } catch (error: any) {
-      console.error('Failed to get IP info:', error);
-      const errorMsg = error?.toString() || '未知错误';
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       
-      // 如果有缓存数据，显示缓存但标记为过期
       if (cachedData) {
-        const cached = JSON.parse(cachedData);
+        const cached = JSON.parse(cachedData) as ExtendedIPInfo;
         cached.stale = true;
         setIpInfo(cached);
       }
       
-      // 设置错误信息
       if (errorMsg.includes('Failed to get IP')) {
-        setLoadError('无法获取IP信息。请检查网络连接或代理服务是否正常运行。');
+        setLoadError(t('ipInfo.networkError'));
       } else {
-        setLoadError(`获取IP失败: ${errorMsg}`);
+        setLoadError(`${t('ipInfo.error')}: ${errorMsg}`);
       }
       
-      // 自动重试（最多3次）
       if (retryCount < 3 && isRunning) {
         setRetryCount(prev => prev + 1);
-        setTimeout(() => loadIpInfo(true), 5000); // 5秒后重试
+        setTimeout(() => loadIpInfo(true), 5000);
       }
     } finally {
       setIpLoading(false);

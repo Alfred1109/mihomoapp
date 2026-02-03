@@ -24,7 +24,10 @@ import {
   Warning,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 import { isTauriEnv } from '../utils/tauri';
+import { useAppStore } from '../store/appStore';
+import type { ConfigValue, ProxiesResponse, ProxyNode } from '../types';
 
 interface SystemStatusCardProps {
   isRunning: boolean;
@@ -39,35 +42,24 @@ interface ProxyInfo {
 }
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunning, showNotification }) => {
+  const { t } = useTranslation();
+  const { isAdmin } = useAppStore();
   const [tunMode, setTunMode] = useState(false);
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<ConfigValue | null>(null);
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [totalProxies, setTotalProxies] = useState(0);
   const [onlineProxies, setOnlineProxies] = useState(0);
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [tunLoading, setTunLoading] = useState(false);
 
   useEffect(() => {
     loadSystemStatus();
-    checkAdminStatus();
   }, [isRunning]);
-
-  const checkAdminStatus = async () => {
-    if (!isTauriEnv()) return;
-    try {
-      const adminStatus = await invoke<boolean>('check_admin_privileges');
-      setIsAdmin(adminStatus);
-    } catch (error) {
-      console.error('Failed to check admin status:', error);
-      setIsAdmin(false);
-    }
-  };
 
   const handleRestartAsAdmin = async () => {
     try {
       await invoke('restart_as_admin');
     } catch (error) {
-      showNotification(`以管理员身份重启失败: ${error}`, 'error');
+      showNotification(`${t('systemStatus.restartAsAdminFailed')}: ${error}`, 'error');
     }
   };
 
@@ -75,53 +67,48 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
     if (!isTauriEnv()) return;
 
     try {
-      // 只加载配置，不加载代理数据（减少API调用）
-      const configData = await invoke<any>('get_mihomo_config');
+      const configData = await invoke<ConfigValue>('get_mihomo_config');
       setConfig(configData);
       setTunMode(configData.tun?.enable || false);
 
-      // 延迟加载代理数据，避免阻塞页面渲染
       if (isRunning) {
         setTimeout(async () => {
           try {
-            const proxiesData = await invoke<any>('get_proxies');
+            const proxiesData = await invoke<ProxiesResponse>('get_proxies');
             if (proxiesData.proxies) {
               const allProxies: ProxyInfo[] = Object.entries(proxiesData.proxies)
-                .filter(([name, proxy]: [string, any]) => {
+                .filter(([name, proxy]) => {
                   const excludeTypes = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'];
                   const excludeNames = ['DIRECT', 'REJECT', 'COMPATIBLE', 'PASS', 'REJECT-DROP'];
                   return !excludeTypes.includes(proxy.type) && !excludeNames.includes(name);
                 })
-                .map(([name, proxy]: [string, any]) => ({
-                  name,
-                  type: proxy.type,
-                  delay: proxy.history?.[0]?.delay || null,
-                  alive: proxy.alive === true,
-                }));
+                .map(([name, proxy]) => {
+                  const node = proxy as ProxyNode;
+                  return {
+                    name,
+                    type: node.type,
+                    delay: node.history?.[0]?.delay ?? null,
+                    alive: node.alive === true,
+                  };
+                });
               
-              // 统计所有节点
               setTotalProxies(allProxies.length);
               setOnlineProxies(allProxies.filter(p => p.alive).length);
-              
-              // 只显示前5个节点
               setProxies(allProxies.slice(0, 5));
             }
-          } catch (error) {
-            console.error('Failed to load proxies:', error);
+          } catch {
           }
-        }, 500); // 延迟500ms加载
+        }, 500);
       }
-    } catch (error) {
-      console.error('Failed to load system status:', error);
+    } catch {
     }
   };
 
   const handleTunToggle = async (enable: boolean) => {
     setTunLoading(true);
     try {
-      // 首先检查管理员权限（仅在启用TUN时）
       if (enable && !isAdmin) {
-        showNotification('TUN 模式需要管理员权限！请以管理员身份重新启动程序后再启用 TUN 模式。', 'error');
+        showNotification(t('systemStatus.tunRequiresAdmin'), 'error');
         setTunLoading(false);
         return;
       }
@@ -129,41 +116,33 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
       await invoke<string>('enable_tun_mode', { enable });
       setTunMode(enable);
       
-      // 如果服务正在运行，自动重启服务使配置生效
       if (isRunning) {
         showNotification(
-          enable 
-            ? 'TUN 模式已启用，正在重启服务使配置生效...' 
-            : 'TUN 模式已关闭，正在重启服务使配置生效...',
+          enable ? t('systemStatus.tunEnabling') : t('systemStatus.tunDisabling'),
           'info'
         );
         
         try {
           await invoke<string>('restart_mihomo_service_cmd');
-          // 等待服务重启完成
           await new Promise(resolve => setTimeout(resolve, 2000));
           showNotification(
-            enable 
-              ? 'TUN 模式已启用并生效！所有网络流量将通过代理。' 
-              : 'TUN 模式已关闭并生效。',
+            enable ? t('systemStatus.tunEnabled') : t('systemStatus.tunDisabled'),
             'success'
           );
         } catch (restartError) {
           showNotification(
-            `配置已保存，但重启服务失败: ${restartError}。请手动重启服务。`,
+            `${t('systemStatus.tunSavedRestartFailed')}: ${restartError}`,
             'warning'
           );
         }
       } else {
         showNotification(
-          enable 
-            ? 'TUN 模式已启用。请启动服务使配置生效。' 
-            : 'TUN 模式已关闭。请启动服务使配置生效。',
+          enable ? t('systemStatus.tunEnabledStartService') : t('systemStatus.tunDisabledStartService'),
           'info'
         );
       }
     } catch (error) {
-      showNotification(`${enable ? '启用' : '关闭'} TUN 模式失败: ${error}`, 'error');
+      showNotification(`${t('systemStatus.tunToggleFailed')}: ${error}`, 'error');
     } finally {
       setTunLoading(false);
     }

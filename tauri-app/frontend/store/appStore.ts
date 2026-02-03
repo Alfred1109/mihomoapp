@@ -13,6 +13,9 @@ interface AppStore {
   isAdmin: boolean;
   adminCheckDone: boolean;
   eventListeners: UnlistenFn[];
+  lastConfigChange: number;
+  lastProxyChange: { groupName: string; proxyName: string; timestamp: number } | null;
+  lastSubscriptionUpdate: { id: string; status: string; timestamp: number } | null;
   
   setMihomoStatus: (status: MihomoStatus) => void;
   setIsAdmin: (isAdmin: boolean) => void;
@@ -31,6 +34,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   isAdmin: false,
   adminCheckDone: false,
   eventListeners: [],
+  lastConfigChange: 0,
+  lastProxyChange: null,
+  lastSubscriptionUpdate: null,
   
   setMihomoStatus: (status) => set({ mihomoStatus: status }),
   setIsAdmin: (isAdmin) => set({ isAdmin }),
@@ -52,15 +58,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     listeners.push(unlistenStatus);
     
-    const unlistenConfig = await listen<ConfigChangeEvent>('config-change', (_event) => {
+    const unlistenConfig = await listen<ConfigChangeEvent>('config-change', (event) => {
+      set({ lastConfigChange: event.payload.timestamp });
     });
     listeners.push(unlistenConfig);
     
-    const unlistenProxy = await listen<ProxyChangeEvent>('proxy-change', (_event) => {
+    const unlistenProxy = await listen<ProxyChangeEvent>('proxy-change', (event) => {
+      set({ 
+        lastProxyChange: {
+          groupName: event.payload.group_name,
+          proxyName: event.payload.proxy_name,
+          timestamp: event.payload.timestamp,
+        }
+      });
     });
     listeners.push(unlistenProxy);
 
-    const unlistenSubscription = await listen<SubscriptionUpdateEvent>('subscription-update', (_event) => {
+    const unlistenSubscription = await listen<SubscriptionUpdateEvent>('subscription-update', (event) => {
+      set({
+        lastSubscriptionUpdate: {
+          id: event.payload.subscription_id,
+          status: event.payload.status,
+          timestamp: event.payload.timestamp,
+        }
+      });
     });
     listeners.push(unlistenSubscription);
     

@@ -27,37 +27,20 @@ import {
   SignalWifiOff,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
+import { useTranslation } from 'react-i18next';
 import { proxyCache, defer } from '../utils/performance';
+import type { ProxyNode, ProxyGroup, ProxiesResponse } from '../types';
 
 interface ProxyManagerProps {
   isRunning: boolean;
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-interface ProxyNode {
-  name: string;
-  type: string;
-  delay?: number;
-  alive: boolean;
-  history?: Array<{ delay: number; time: string }>;
-}
-
-interface ProxyGroup {
-  name: string;
-  type: string;
-  now?: string;
-  all: string[];
-  history?: Array<{ name: string; delay: number; time: string }>;
-}
-
-interface ProxiesResponse {
-  proxies: Record<string, ProxyNode | ProxyGroup>;
-}
-
 type SortField = 'name' | 'type' | 'delay' | 'status';
 type SortOrder = 'asc' | 'desc';
 
 const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showNotification }) => {
+  const { t } = useTranslation();
   const [proxies, setProxies] = useState<{ [key: string]: ProxyNode | ProxyGroup }>({});
   const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
@@ -101,21 +84,17 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const loadProxies = async () => {
     if (!isRunning) return;
     
-    // 检查缓存
     const cached = proxyCache.get('proxies');
     if (cached) {
       setProxies(cached.proxies || {});
-      // 从缓存中提取代理组
       extractProxyGroups(cached);
-      // 使用缓存数据后，异步更新
       defer(async () => {
         try {
-          const response = await invoke<any>('get_proxies');
+          const response = await invoke<ProxiesResponse>('get_proxies');
           proxyCache.set('proxies', response);
           setProxies(response.proxies || {});
           extractProxyGroups(response);
-        } catch (error) {
-          console.error('Background proxy update failed:', error);
+        } catch {
         }
       }, 100);
       return;
@@ -123,12 +102,12 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     
     setLoading(true);
     try {
-      const response = await invoke<any>('get_proxies');
+      const response = await invoke<ProxiesResponse>('get_proxies');
       proxyCache.set('proxies', response);
       setProxies(response.proxies || {});
       extractProxyGroups(response);
     } catch (error) {
-      showNotification(`加载代理失败: ${error}`, 'error');
+      showNotification(`${t('proxy.loadFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -137,16 +116,15 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const handleTestAllProxies = async () => {
     try {
       setLoading(true);
-      showNotification('开始批量测速，请稍候...', 'info');
-      const result = await invoke<any>('test_all_proxies', { 
-        testUrl: 'http://1.1.1.1',
+      showNotification(t('proxy.testStarting'), 'info');
+      const result = await invoke<{ success: number; total: number }>('test_all_proxies', { 
+        test_url: 'http://1.1.1.1',
         timeout: 5000 
       });
-      // 直接刷新列表，不弹窗
       await loadProxies();
-      showNotification(`批量测速完成！成功测试 ${result.success}/${result.total} 个节点`, 'success');
+      showNotification(t('proxy.testComplete', { success: result.success, total: result.total }), 'success');
     } catch (error) {
-      showNotification(`批量测速失败: ${error}`, 'error');
+      showNotification(`${t('proxy.testFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -155,26 +133,23 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const handleSwitchProxy = async (groupName: string, proxyName: string) => {
     try {
       setLoading(true);
-      await invoke('switch_proxy', { groupName, proxyName });
+      await invoke('switch_proxy', { group_name: groupName, proxy_name: proxyName });
       
-      // 记录切换历史，保留最近3条
       const newHistory = [
         { groupName, nodeName: proxyName, time: new Date().toISOString() },
         ...proxyHistory.filter(h => !(h.groupName === groupName && h.nodeName === proxyName))
       ].slice(0, 3);
       setProxyHistory(newHistory);
       
-      // 保存到localStorage
       try {
         localStorage.setItem('proxyHistory', JSON.stringify(newHistory));
-      } catch (e) {
-        console.error('Failed to save proxy history:', e);
+      } catch {
       }
       
-      showNotification('代理切换成功', 'success');
-      await loadProxies(); // Refresh data
+      showNotification(t('proxy.switchSuccess'), 'success');
+      await loadProxies();
     } catch (error) {
-      showNotification(`切换代理失败: ${error}`, 'error');
+      showNotification(`${t('proxy.switchFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -206,8 +181,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
 
   const sortNodes = (nodeNames: string[]) => {
     return [...nodeNames].sort((a, b) => {
-      const nodeA = proxies[a] as any;
-      const nodeB = proxies[b] as any;
+      const nodeA = proxies[a] as ProxyNode;
+      const nodeB = proxies[b] as ProxyNode;
       
       let compareResult = 0;
       
@@ -240,18 +215,15 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   useEffect(() => {
     loadProxies();
     
-    // 从localStorage加载历史记录
     try {
       const saved = localStorage.getItem('proxyHistory');
       if (saved) {
         setProxyHistory(JSON.parse(saved));
       }
-    } catch (e) {
-      console.error('Failed to load proxy history:', e);
+    } catch {
     }
     
     if (isRunning) {
-      // 延长刷新间隔到30秒，减少不必要的API调用
       const interval = setInterval(loadProxies, 30000);
       return () => clearInterval(interval);
     }
@@ -263,10 +235,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
         <CardContent sx={{ textAlign: 'center', py: 8 }}>
           <SignalWifiOff sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="h6" gutterBottom>
-            代理服务未运行
+            {t('proxy.notRunning')}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            请启动 Mihomo 服务以管理代理节点和组
+            {t('proxy.notRunningDesc')}
           </Typography>
         </CardContent>
       </Card>
@@ -275,9 +247,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
 
   return (
     <Box>
-      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">代理管理</Typography>
+        <Typography variant="h5">{t('proxy.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             variant="outlined"
@@ -285,7 +256,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
             onClick={handleTestAllProxies}
             disabled={!isRunning || loading}
           >
-            批量测速
+            {t('proxy.testAll')}
           </Button>
           <Button
             variant="contained"
@@ -293,33 +264,32 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
             onClick={loadProxies}
             disabled={!isRunning || loading}
           >
-            刷新
+            {t('proxy.refresh')}
           </Button>
         </Box>
       </Box>
 
       {loading && <LinearProgress sx={{ mb: 2 }} />}
 
-      {/* PROXY组状态信息 */}
       {groups.length > 0 && groups[0].name === 'PROXY' && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <Box>
             <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-              PROXY 主代理组
+              {t('proxy.proxyGroupInfo')}
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              • 当前选择：<strong>{groups[0].now || '无'}</strong>
-              {groups[0].now === 'auto' && ' - 自动测速并选择延迟最低的节点'}
-              {groups[0].now !== 'auto' && groups[0].now && groups[0].now !== 'DIRECT' && ' - 固定使用此节点'}
-              {groups[0].now === 'DIRECT' && ' - 直连模式（不使用代理）'}
+              • {t('proxy.currentSelection')}: <strong>{groups[0].now || 'N/A'}</strong>
+              {groups[0].now === 'auto' && ` - ${t('proxy.autoDesc')}`}
+              {groups[0].now !== 'auto' && groups[0].now && groups[0].now !== 'DIRECT' && ` - ${t('proxy.fixedDesc')}`}
+              {groups[0].now === 'DIRECT' && ` - ${t('proxy.directDesc')}`}
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              • 可用节点：{groups[0].all?.length || 0} 个
-              {groups[0].now !== 'auto' && ' | 如需自动选择最快节点，请在下方选择 "auto"'}
-              {groups[0].now === 'auto' && ' | 如需固定使用某个节点，请在下方直接选择'}
+              • {t('proxy.availableCount')}: {groups[0].all?.length || 0}
+              {groups[0].now !== 'auto' && ` | ${t('proxy.selectAutoTip')}`}
+              {groups[0].now === 'auto' && ` | ${t('proxy.selectManualTip')}`}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              💡 提示：所有流量都通过PROXY组，选择合适的节点以获得最佳体验
+              {t('proxy.tip')}
             </Typography>
           </Box>
         </Alert>
@@ -331,11 +301,11 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
               <Typography variant="h6">
-                节点列表
+                {t('proxy.nodeList')}
               </Typography>
               {selectedGroup === 'PROXY' && groups.find(g => g.name === 'PROXY')?.now === 'auto' && (
                 <Chip 
-                  label="自动模式：选择延迟最低的节点" 
+                  label={t('proxy.autoMode')} 
                   color="success" 
                   size="small" 
                   icon={<Speed />}
@@ -359,7 +329,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             direction={sortField === 'name' ? sortOrder : 'asc'}
                             onClick={() => handleSort('name')}
                           >
-                            节点名称
+                            {t('proxy.nodeName')}
                           </TableSortLabel>
                         </TableCell>
                         <TableCell>
@@ -368,7 +338,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             direction={sortField === 'type' ? sortOrder : 'asc'}
                             onClick={() => handleSort('type')}
                           >
-                            类型
+                            {t('proxy.type')}
                           </TableSortLabel>
                         </TableCell>
                         <TableCell>
@@ -377,7 +347,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             direction={sortField === 'delay' ? sortOrder : 'asc'}
                             onClick={() => handleSort('delay')}
                           >
-                            延迟
+                            {t('proxy.delay')}
                           </TableSortLabel>
                         </TableCell>
                         <TableCell>
@@ -386,17 +356,16 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             direction={sortField === 'status' ? sortOrder : 'asc'}
                             onClick={() => handleSort('status')}
                           >
-                            状态
+                            {t('proxy.status')}
                           </TableSortLabel>
                         </TableCell>
-                        <TableCell>操作</TableCell>
+                        <TableCell>{t('proxy.action')}</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {sortNodes(group.all).map((nodeName) => {
-                        const node = proxies[nodeName] as any;
+                        const node = proxies[nodeName] as ProxyNode;
                         const isActive = group.now === nodeName;
-                        // 从节点自身的history字段获取最新延迟（Mihomo的history是倒序的，最新在索引0）
                         const history = node?.history;
                         const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
                         
@@ -427,13 +396,12 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             </TableCell>
                             <TableCell>
                               {(() => {
-                                // 如果有有效的延迟数据，说明节点可用
                                 const hasValidDelay = nodeDelay !== undefined && nodeDelay > 0;
                                 const isOnline = node?.alive === true || hasValidDelay;
                                 return (
                                   <Chip
                                     icon={isOnline ? <CheckCircle /> : <Error />}
-                                    label={isOnline ? '在线' : '离线'}
+                                    label={isOnline ? t('proxy.online') : t('proxy.offline')}
                                     size="small"
                                     color={isOnline ? 'success' : 'error'}
                                   />
@@ -447,7 +415,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                                 onClick={() => handleSwitchProxy(selectedGroup, nodeName)}
                                 disabled={loading || isActive}
                               >
-                                {isActive ? '当前' : '切换'}
+                                {isActive ? t('proxy.current') : t('proxy.switch')}
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -462,9 +430,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
         </Card>
       )}
 
-      {/* Connection History */}
       {selectedGroup && proxyHistory.length > 0 && (() => {
-        // 只显示当前选中组的历史记录
         const groupHistory = proxyHistory.filter(h => h.groupName === selectedGroup).slice(0, 3);
         
         if (groupHistory.length === 0) return null;
@@ -473,21 +439,21 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           <Card sx={{ mt: 3 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                历史使用节点 - {selectedGroup}
+                {t('proxy.historyTitle')} - {selectedGroup}
               </Typography>
               
               <TableContainer component={Paper}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>节点名称</TableCell>
-                      <TableCell>当前延迟</TableCell>
-                      <TableCell>切换时间</TableCell>
+                      <TableCell>{t('proxy.nodeName')}</TableCell>
+                      <TableCell>{t('proxy.currentDelay')}</TableCell>
+                      <TableCell>{t('proxy.switchTime')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {groupHistory.map((item, index) => {
-                      const node = proxies[item.nodeName] as any;
+                      const node = proxies[item.nodeName] as ProxyNode;
                       const history = node?.history;
                       const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
                       
@@ -502,7 +468,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                             />
                           </TableCell>
                           <TableCell>
-                            {new Date(item.time).toLocaleString('zh-CN', {
+                            {new Date(item.time).toLocaleString(undefined, {
                               month: '2-digit',
                               day: '2-digit',
                               hour: '2-digit',
@@ -520,16 +486,15 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
         );
       })()}
 
-      {/* No Proxies Available */}
       {groups.length === 0 && !loading && (
         <Card>
           <CardContent sx={{ textAlign: 'center', py: 8 }}>
             <Speed sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              暂无代理组
+              {t('proxy.noProxyGroups')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              请先配置代理订阅以管理代理节点
+              {t('proxy.noProxyGroupsDesc')}
             </Typography>
           </CardContent>
         </Card>

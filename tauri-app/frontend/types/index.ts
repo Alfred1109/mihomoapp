@@ -32,13 +32,13 @@ export interface Subscription {
   id: string;
   name: string;
   url: string;
-  user_agent: string | null;
+  user_agent?: string | null;
   use_proxy: boolean;
   created_at: string;
   last_updated: string;
   proxy_count: number;
   status: SubscriptionStatus;
-  last_error: string | null;
+  last_error?: string | null;
 }
 
 export type SubscriptionStatus = 'Active' | 'Error' | 'Updating';
@@ -59,8 +59,9 @@ export interface RestoreResult {
 export interface ProxyGroup {
   name: string;
   type: string;
-  now: string;
+  now?: string;
   all: string[];
+  history?: ProxyHistory[];
 }
 
 export interface ProxyNode {
@@ -68,12 +69,15 @@ export interface ProxyNode {
   type: string;
   server?: string;
   port?: number;
-  history: ProxyHistory[];
+  delay?: number;
+  alive?: boolean;
+  history?: ProxyHistory[];
 }
 
 export interface ProxyHistory {
   time: string;
   delay: number;
+  name?: string;
 }
 
 export interface ProxiesResponse {
