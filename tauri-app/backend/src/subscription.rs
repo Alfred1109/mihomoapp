@@ -43,6 +43,8 @@ pub struct Subscription {
     pub proxy_count: u32,
     pub status: SubscriptionStatus,
     pub last_error: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,8 +67,11 @@ pub async fn add_subscription(
 ) -> Result<()> {
     let mut storage = load_subscriptions().await.unwrap_or_default();
 
+    let id = Uuid::new_v4().to_string();
+    let file = format!("{}.yaml", id);
+
     let subscription = Subscription {
-        id: Uuid::new_v4().to_string(),
+        id: id.clone(),
         name,
         url,
         user_agent,
@@ -76,6 +81,7 @@ pub async fn add_subscription(
         proxy_count: 0,
         status: SubscriptionStatus::Active,
         last_error: None,
+        file: Some(file),
     };
 
     storage
@@ -96,25 +102,28 @@ pub async fn update_subscription(id: &str) -> Result<()> {
 
     if let Some(subscription) = storage.subscriptions.get_mut(id) {
         subscription.status = SubscriptionStatus::Updating;
+        if subscription.file.is_none() {
+            subscription.file = Some(format!("{}.yaml", id));
+        }
         let subscription_clone = subscription.clone();
         save_subscriptions(&storage).await?;
 
-        // Fetch and parse subscription content
-        match fetch_and_parse_subscription(&subscription_clone).await {
-            Ok(proxies) => {
+        match fetch_and_save_subscription(&subscription_clone).await {
+            Ok((raw_content, proxies)) => {
                 let proxy_count = proxies.len() as u32;
 
-                // Update subscription status
+                save_profile_content(id, &raw_content).await?;
+
                 storage = load_subscriptions().await.unwrap_or_default();
                 if let Some(sub) = storage.subscriptions.get_mut(id) {
                     sub.status = SubscriptionStatus::Active;
                     sub.proxy_count = proxy_count;
                     sub.last_updated = chrono::Utc::now().to_rfc3339();
                     sub.last_error = None;
+                    sub.file = Some(format!("{}.yaml", id));
                 }
                 save_subscriptions(&storage).await?;
 
-                // Regenerate config with all active subscriptions
                 let active_ids: Vec<String> = storage
                     .subscriptions
                     .values()
@@ -159,6 +168,11 @@ pub async fn delete_subscription(id: &str) -> Result<()> {
 
     if storage.subscriptions.remove(id).is_some() {
         save_subscriptions(&storage).await?;
+
+        if let Err(e) = delete_profile_file(id).await {
+            warn!("删除订阅文件失败: {}", e);
+        }
+
         Ok(())
     } else {
         Err(anyhow::anyhow!("Subscription not found"))
@@ -176,7 +190,14 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
                 continue;
             }
 
-            let proxies = fetch_and_parse_subscription(subscription).await?;
+            let proxies = match load_proxies_from_profile(&id).await {
+                Ok(p) => p,
+                Err(_) => {
+                    info!("本地文件不存在，从网络获取订阅: {}", subscription.name);
+                    fetch_and_parse_subscription(subscription).await?
+                }
+            };
+
             for proxy in proxies {
                 if let Some(name) = proxy["name"].as_str() {
                     proxy_names.push(name.to_string());
@@ -222,6 +243,11 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
     }
 
     Ok(())
+}
+
+async fn load_proxies_from_profile(id: &str) -> Result<Vec<serde_json::Value>> {
+    let content = load_profile_content(id).await?;
+    parse_subscription_content(&content)
 }
 
 pub async fn export_subscriptions() -> Result<String> {
@@ -339,27 +365,22 @@ async fn fetch_subscription_content(subscription: &Subscription) -> Result<u32> 
     Ok(proxies.len() as u32)
 }
 
-async fn fetch_and_parse_subscription(
+async fn fetch_and_save_subscription(
     subscription: &Subscription,
-) -> Result<Vec<serde_json::Value>> {
-    // 使用真实的浏览器User-Agent避免418错误
+) -> Result<(String, Vec<serde_json::Value>)> {
     let default_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     let mut client_builder = reqwest::Client::builder()
         .user_agent(subscription.user_agent.as_deref().unwrap_or(default_ua))
         .timeout(std::time::Duration::from_secs(30))
         .danger_accept_invalid_certs(true);
 
-    // 如果不使用代理，则完全禁用所有代理
     if !subscription.use_proxy {
         info!(
             "订阅 '{}' 配置为直连模式，完全绕过系统代理",
             subscription.name
         );
-        // 禁用系统代理和环境变量代理
         client_builder = client_builder.no_proxy();
 
-        // 绑定到本地网卡，确保直连
-        // 使用 0.0.0.0 绑定到所有本地接口，确保不通过代理
         if let Ok(addr) = "0.0.0.0".parse::<std::net::IpAddr>() {
             client_builder = client_builder.local_address(addr);
         }
@@ -385,7 +406,43 @@ async fn fetch_and_parse_subscription(
         return Err(anyhow::anyhow!("订阅服务器返回空内容"));
     }
 
-    parse_subscription_content(&content).context("订阅内容解析失败")
+    let proxies = parse_subscription_content(&content).context("订阅内容解析失败")?;
+
+    let yaml_content = generate_profile_yaml(&content, &proxies)?;
+
+    Ok((yaml_content, proxies))
+}
+
+fn generate_profile_yaml(raw_content: &str, proxies: &[serde_json::Value]) -> Result<String> {
+    let decoded_content = if let Ok(decoded) =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw_content.trim())
+    {
+        String::from_utf8(decoded).unwrap_or_else(|_| raw_content.to_string())
+    } else {
+        raw_content.to_string()
+    };
+
+    if let Ok(docs) = yaml_rust::YamlLoader::load_from_str(&decoded_content) {
+        if let Some(doc) = docs.first() {
+            if doc["proxies"].as_vec().is_some() {
+                return Ok(decoded_content);
+            }
+        }
+    }
+
+    let proxy_list: Vec<serde_json::Value> = proxies.to_vec();
+    let yaml_obj = serde_json::json!({
+        "proxies": proxy_list
+    });
+
+    serde_yaml::to_string(&yaml_obj).context("Failed to serialize proxies to YAML")
+}
+
+async fn fetch_and_parse_subscription(
+    subscription: &Subscription,
+) -> Result<Vec<serde_json::Value>> {
+    let (_, proxies) = fetch_and_save_subscription(subscription).await?;
+    Ok(proxies)
 }
 
 fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
@@ -1193,6 +1250,46 @@ fn get_subscriptions_path() -> Result<PathBuf> {
         .join("data");
 
     Ok(config_dir.join("subscriptions.json"))
+}
+
+fn get_profiles_dir() -> Result<PathBuf> {
+    let profiles_dir = dirs::config_dir()
+        .context("Failed to get config directory")?
+        .join("mihomo")
+        .join("profiles");
+
+    fs::create_dir_all(&profiles_dir).context("Failed to create profiles directory")?;
+
+    Ok(profiles_dir)
+}
+
+fn get_profile_path(id: &str) -> Result<PathBuf> {
+    let profiles_dir = get_profiles_dir()?;
+    Ok(profiles_dir.join(format!("{}.yaml", id)))
+}
+
+async fn save_profile_content(id: &str, content: &str) -> Result<()> {
+    let path = get_profile_path(id)?;
+    fs::write(&path, content).context("Failed to write profile file")?;
+    info!("订阅内容已保存到: {:?}", path);
+    Ok(())
+}
+
+async fn load_profile_content(id: &str) -> Result<String> {
+    let path = get_profile_path(id)?;
+    if !path.exists() {
+        return Err(anyhow::anyhow!("Profile file not found: {:?}", path));
+    }
+    fs::read_to_string(&path).context("Failed to read profile file")
+}
+
+async fn delete_profile_file(id: &str) -> Result<()> {
+    let path = get_profile_path(id)?;
+    if path.exists() {
+        fs::remove_file(&path).context("Failed to delete profile file")?;
+        info!("已删除订阅文件: {:?}", path);
+    }
+    Ok(())
 }
 
 impl PartialEq for SubscriptionStatus {

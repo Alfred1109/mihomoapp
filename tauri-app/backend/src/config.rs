@@ -72,8 +72,8 @@ pub async fn reset_to_default_config() -> Result<String> {
     
     match crate::subscription::generate_config_from_subscriptions(subscription_ids).await {
         Ok(_) => {
-            tracing::info!("配置已重置为默认值并重新生成（使用现有订阅）");
-            Ok("配置已重置为默认值，并使用现有订阅重新生成了运行时配置。".to_string())
+            tracing::info!("配置已重置为默认值并重新生成（使用本地缓存的订阅）");
+            Ok("配置已重置为默认值，并使用本地缓存的订阅重新生成了运行时配置。".to_string())
         }
         Err(e) => {
             tracing::warn!("重新生成配置失败: {}", e);
