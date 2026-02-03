@@ -11,12 +11,17 @@ import {
   List,
   ListItem,
   ListItemText,
+  Alert,
+  Button,
+  CircularProgress,
 } from '@mui/material';
 import {
   Router,
   Speed,
   Settings,
   CheckCircle,
+  AdminPanelSettings,
+  Warning,
 } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 import { isTauriEnv } from '../utils/tauri';
@@ -39,10 +44,32 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [totalProxies, setTotalProxies] = useState(0);
   const [onlineProxies, setOnlineProxies] = useState(0);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [tunLoading, setTunLoading] = useState(false);
 
   useEffect(() => {
     loadSystemStatus();
+    checkAdminStatus();
   }, [isRunning]);
+
+  const checkAdminStatus = async () => {
+    if (!isTauriEnv()) return;
+    try {
+      const adminStatus = await invoke<boolean>('check_admin_privileges');
+      setIsAdmin(adminStatus);
+    } catch (error) {
+      console.error('Failed to check admin status:', error);
+      setIsAdmin(false);
+    }
+  };
+
+  const handleRestartAsAdmin = async () => {
+    try {
+      await invoke('restart_as_admin');
+    } catch (error) {
+      showNotification(`以管理员身份重启失败: ${error}`, 'error');
+    }
+  };
 
   const loadSystemStatus = async () => {
     if (!isTauriEnv()) return;
@@ -90,12 +117,55 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
   };
 
   const handleTunToggle = async (enable: boolean) => {
+    setTunLoading(true);
     try {
+      // 首先检查管理员权限（仅在启用TUN时）
+      if (enable && !isAdmin) {
+        showNotification('TUN 模式需要管理员权限！请以管理员身份重新启动程序后再启用 TUN 模式。', 'error');
+        setTunLoading(false);
+        return;
+      }
+
       await invoke<string>('enable_tun_mode', { enable });
       setTunMode(enable);
-      showNotification(`TUN mode ${enable ? 'enabled' : 'disabled'}`, 'success');
+      
+      // 如果服务正在运行，自动重启服务使配置生效
+      if (isRunning) {
+        showNotification(
+          enable 
+            ? 'TUN 模式已启用，正在重启服务使配置生效...' 
+            : 'TUN 模式已关闭，正在重启服务使配置生效...',
+          'info'
+        );
+        
+        try {
+          await invoke<string>('restart_mihomo_service_cmd');
+          // 等待服务重启完成
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          showNotification(
+            enable 
+              ? 'TUN 模式已启用并生效！所有网络流量将通过代理。' 
+              : 'TUN 模式已关闭并生效。',
+            'success'
+          );
+        } catch (restartError) {
+          showNotification(
+            `配置已保存，但重启服务失败: ${restartError}。请手动重启服务。`,
+            'warning'
+          );
+        }
+      } else {
+        showNotification(
+          enable 
+            ? 'TUN 模式已启用。请启动服务使配置生效。' 
+            : 'TUN 模式已关闭。请启动服务使配置生效。',
+          'info'
+        );
+      }
     } catch (error) {
-      showNotification(`Failed to ${enable ? 'enable' : 'disable'} TUN mode: ${error}`, 'error');
+      showNotification(`${enable ? '启用' : '关闭'} TUN 模式失败: ${error}`, 'error');
+    } finally {
+      setTunLoading(false);
     }
   };
 
@@ -154,28 +224,66 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
 
         <Divider sx={{ my: 2 }} />
 
+        {/* Admin Status Warning */}
+        {isAdmin === false && (
+          <Alert 
+            severity="warning" 
+            sx={{ mb: 2 }}
+            icon={<Warning />}
+            action={
+              <Button 
+                color="inherit" 
+                size="small"
+                onClick={handleRestartAsAdmin}
+                startIcon={<AdminPanelSettings />}
+              >
+                以管理员身份重启
+              </Button>
+            }
+          >
+            <Typography variant="body2">
+              程序未以管理员身份运行，TUN模式将无法正常工作。
+            </Typography>
+          </Alert>
+        )}
+
         {/* TUN Mode Toggle */}
         <Box sx={{ mb: 2 }}>
           <FormControlLabel
             control={
-              <Switch
-                checked={tunMode}
-                onChange={(e) => handleTunToggle(e.target.checked)}
-                disabled={!isRunning}
-              />
+              tunLoading ? (
+                <CircularProgress size={20} sx={{ mx: 1.5 }} />
+              ) : (
+                <Switch
+                  checked={tunMode}
+                  onChange={(e) => handleTunToggle(e.target.checked)}
+                  disabled={!isRunning || tunLoading}
+                />
+              )
             }
             label={
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Router fontSize="small" />
                 <Typography variant="body2">
-                  TUN 模式
+                  TUN 模式（全局代理）
                 </Typography>
                 {tunMode && (
                   <Chip label="已启用" size="small" color="success" />
                 )}
+                {!isAdmin && tunMode && (
+                  <Chip 
+                    label="需要管理员权限" 
+                    size="small" 
+                    color="warning" 
+                    variant="outlined"
+                  />
+                )}
               </Box>
             }
           />
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 4, display: 'block' }}>
+            启用后所有网络流量将通过代理，需要管理员权限
+          </Typography>
         </Box>
 
         {/* Quick Stats */}
