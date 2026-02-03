@@ -629,10 +629,20 @@ async fn install_mihomo_service(
         use std::process::Command;
         let paths = windows_service::get_service_paths()?;
 
-        // 先尝试卸载旧服务（忽略错误）
-        let _ = Command::new(&paths.winsw_exe).arg("stop").output();
-        windows_service::kill_mihomo_process();
-        let _ = Command::new(&paths.winsw_exe).arg("uninstall").output();
+        // 只有在服务已安装的情况下才执行清理操作
+        if windows_service::is_service_installed() {
+            // 停止并卸载旧服务（静默忽略错误）
+            let _ = Command::new(&paths.winsw_exe)
+                .args(["stop", "--force"])
+                .output();
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            windows_service::kill_mihomo_process();
+            let _ = Command::new(&paths.winsw_exe).arg("uninstall").output();
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        } else {
+            // 服务未安装，只需要确保没有残留的 mihomo 进程
+            windows_service::kill_mihomo_process();
+        }
 
         // 安装服务
         let output = Command::new(&paths.winsw_exe)
