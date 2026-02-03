@@ -43,24 +43,9 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
-    // 当服务状态变化时，清除缓存并重新加载IP信息
-    if (isRunning) {
-      // 服务启动后，等待一会儿再检测IP，确保代理已经生效
-      const timer = setTimeout(() => {
-        loadIpInfo(true); // 强制刷新
-      }, 3000);
-      return () => clearTimeout(timer);
-    } else {
-      // 服务停止时也刷新，显示真实IP
-      loadIpInfo(true);
-    }
-  }, [isRunning]);
-
-  const loadIpInfo = async (forceRefresh = false) => {
+  const loadIpInfo = useCallback(async (forceRefresh = false, showWarning = false) => {
     if (!isTauriEnv()) return;
     
-    // 检查缓存（5分钟内不重复请求，但服务状态变化时强制刷新）
     const cachedData = localStorage.getItem('ipInfo');
     const cachedTime = localStorage.getItem('ipInfoTime');
     
@@ -82,10 +67,6 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
       setRetryCount(0);
       localStorage.setItem('ipInfo', JSON.stringify(data));
       localStorage.setItem('ipInfoTime', Date.now().toString());
-      
-      if (isRunning && data.proxy_status === 'direct') {
-        showNotification(t('ipInfo.proxyNotWorking'), 'warning');
-      }
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       
@@ -100,15 +81,21 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
       } else {
         setLoadError(`${t('ipInfo.error')}: ${errorMsg}`);
       }
-      
-      if (retryCount < 3 && isRunning) {
-        setRetryCount(prev => prev + 1);
-        setTimeout(() => loadIpInfo(true), 5000);
-      }
     } finally {
       setIpLoading(false);
     }
-  };
+  }, [t]);
+
+  useEffect(() => {
+    if (isRunning) {
+      const timer = setTimeout(() => {
+        loadIpInfo(true, false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else {
+      loadIpInfo(true, false);
+    }
+  }, [isRunning, loadIpInfo]);
 
   const getCountryFlag = (countryCode: string) => {
     if (!countryCode || countryCode.length !== 2) return '🌍';
@@ -126,7 +113,7 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
           <Typography variant="h6">
             IP 信息
           </Typography>
-          <IconButton onClick={() => loadIpInfo(true)} disabled={ipLoading} size="small">
+          <IconButton onClick={() => loadIpInfo(true, false)} disabled={ipLoading} size="small">
             <Refresh />
           </IconButton>
         </Box>

@@ -71,33 +71,34 @@ mod windows_service {
             }
         };
 
-        // 配置文件路径
-        let config_path = dirs::config_dir()
+        // 配置目录路径
+        let config_dir = dirs::config_dir()
             .ok_or("无法获取配置目录")?
-            .join("mihomo")
-            .join("config.yaml");
+            .join("mihomo");
 
         // 确保 WinSW 服务文件存在
         let winsw_exe = app_dir.join("MihomoService.exe");
         let winsw_xml = app_dir.join("MihomoService.xml");
 
-        if !winsw_exe.exists() {
-            std::fs::copy(&winsw_source, &winsw_exe)
-                .map_err(|e| format!("复制 WinSW 失败: {}", e))?;
-        }
+        // 总是复制最新的 WinSW
+        std::fs::copy(&winsw_source, &winsw_exe)
+            .map_err(|e| format!("复制 WinSW 失败: {}", e))?;
 
+        // 总是更新 XML 配置以确保路径正确
         let xml_content = format!(
             r#"<service>
   <id>MihomoService</id>
   <name>Mihomo Proxy Service</name>
   <description>Mihomo Proxy Service</description>
   <executable>{}</executable>
-  <arguments>-f "{}"</arguments>
+  <arguments>-d "{}"</arguments>
   <logpath>{}</logpath>
   <log mode="roll" />
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="5 sec"/>
 </service>"#,
             mihomo_path.display(),
-            config_path.display(),
+            config_dir.display(),
             app_dir.display()
         );
 
