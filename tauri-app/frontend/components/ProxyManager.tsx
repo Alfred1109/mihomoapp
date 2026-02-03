@@ -133,7 +133,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const handleSwitchProxy = async (groupName: string, proxyName: string) => {
     try {
       setLoading(true);
-      await invoke('switch_proxy', { group_name: groupName, proxy_name: proxyName });
+      await invoke('switch_proxy', { groupName, proxyName });
       
       const newHistory = [
         { groupName, nodeName: proxyName, time: new Date().toISOString() },

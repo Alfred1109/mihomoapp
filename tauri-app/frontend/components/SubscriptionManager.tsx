@@ -101,8 +101,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       await invoke('add_subscription', {
         name: newSubscription.name,
         url: newSubscription.url,
-        user_agent: newSubscription.userAgent || null,
-        use_proxy: newSubscription.useProxy,
+        userAgent: newSubscription.userAgent || null,
+        useProxy: newSubscription.useProxy,
       });
       showNotification(t('subscription.addSuccess'), 'success');
       setDialogOpen(false);
