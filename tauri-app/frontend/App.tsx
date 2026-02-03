@@ -108,14 +108,10 @@ function App() {
       const adminStatus = await invoke<boolean>('check_admin_privileges');
       setIsAdmin(adminStatus);
       setAdminCheckDone(true);
-      
-      if (!adminStatus) {
-        showNotification(t('permissions.requiresAdmin'), 'warning');
-      }
     } catch {
       setAdminCheckDone(true);
     }
-  }, [setIsAdmin, setAdminCheckDone, showNotification, t]);
+  }, [setIsAdmin, setAdminCheckDone]);
 
   const handleRestartAsAdmin = async () => {
     if (!isTauriEnv()) return;
