@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import {
   Box,
   Tabs,
@@ -6,23 +6,32 @@ import {
   Alert,
   Snackbar,
   Button,
-  Chip,
   IconButton,
   Menu,
   MenuItem,
   Tooltip,
+  CircularProgress,
+  Typography,
 } from '@mui/material';
 import { Language, FiberManualRecord } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 import { useTranslation } from 'react-i18next';
 import TitleBar from './components/TitleBar';
-import Dashboard from './components/Dashboard';
-import SubscriptionManager from './components/SubscriptionManager';
-import ProxyManager from './components/ProxyManager';
-import ConfigManager from './components/ConfigManager';
 import { TabPanel, ErrorBoundary } from './components/common';
 import { useAppStore } from './store/appStore';
 import { isTauriEnv } from './utils/tauri';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const SubscriptionManager = lazy(() => import('./components/SubscriptionManager'));
+const ProxyManager = lazy(() => import('./components/ProxyManager'));
+const ConfigManager = lazy(() => import('./components/ConfigManager'));
+
+const LoadingFallback: React.FC = () => (
+  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 8, gap: 2 }}>
+    <CircularProgress size={32} />
+    <Typography variant="body2" color="text.secondary">Loading...</Typography>
+  </Box>
+);
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -216,35 +225,43 @@ function App() {
           <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
             <TabPanel value={tabValue} index={0}>
               <ErrorBoundary>
-                <Dashboard 
-                  isRunning={mihomoStatus.running}
-                  onStatusChange={checkMihomoStatus}
-                  showNotification={showNotification}
-                />
+                <Suspense fallback={<LoadingFallback />}>
+                  <Dashboard 
+                    isRunning={mihomoStatus.running}
+                    onStatusChange={checkMihomoStatus}
+                    showNotification={showNotification}
+                  />
+                </Suspense>
               </ErrorBoundary>
             </TabPanel>
 
             <TabPanel value={tabValue} index={1}>
               <ErrorBoundary>
-                <SubscriptionManager showNotification={showNotification} />
+                <Suspense fallback={<LoadingFallback />}>
+                  <SubscriptionManager showNotification={showNotification} />
+                </Suspense>
               </ErrorBoundary>
             </TabPanel>
 
             <TabPanel value={tabValue} index={2}>
               <ErrorBoundary>
-                <ProxyManager 
-                  isRunning={mihomoStatus.running}
-                  showNotification={showNotification}
-                />
+                <Suspense fallback={<LoadingFallback />}>
+                  <ProxyManager 
+                    isRunning={mihomoStatus.running}
+                    showNotification={showNotification}
+                  />
+                </Suspense>
               </ErrorBoundary>
             </TabPanel>
 
             <TabPanel value={tabValue} index={3}>
               <ErrorBoundary>
-                <ConfigManager 
-                  isRunning={mihomoStatus.running}
-                  showNotification={showNotification}
-                />
+                <Suspense fallback={<LoadingFallback />}>
+                  <ConfigManager 
+                    isRunning={mihomoStatus.running}
+                    showNotification={showNotification}
+                  />
+                </Suspense>
               </ErrorBoundary>
             </TabPanel>
           </Box>
