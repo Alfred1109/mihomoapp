@@ -80,11 +80,13 @@ mod windows_service {
         let winsw_exe = app_dir.join("MihomoService.exe");
         let winsw_xml = app_dir.join("MihomoService.xml");
 
-        // 总是复制最新的 WinSW
-        std::fs::copy(&winsw_source, &winsw_exe)
-            .map_err(|e| format!("复制 WinSW 失败: {}", e))?;
+        // 只在文件不存在时复制 WinSW，避免服务运行时文件锁定错误
+        if !winsw_exe.exists() {
+            std::fs::copy(&winsw_source, &winsw_exe)
+                .map_err(|e| format!("复制 WinSW 失败: {}", e))?;
+        }
 
-        // 总是更新 XML 配置以确保路径正确
+        // 更新 XML 配置（XML 文件通常不会被锁定）
         let xml_content = format!(
             r#"<service>
   <id>MihomoService</id>
