@@ -21,11 +21,10 @@ pub async fn load_base_config() -> Result<Value> {
         return Ok(default_config);
     }
 
-    let content = fs::read_to_string(&base_config_path)
-        .context("无法读取基础配置文件")?;
+    let content = fs::read_to_string(&base_config_path).context("无法读取基础配置文件")?;
 
-    let yaml_docs = yaml_rust::YamlLoader::load_from_str(&content)
-        .context("解析基础配置 YAML 失败")?;
+    let yaml_docs =
+        yaml_rust::YamlLoader::load_from_str(&content).context("解析基础配置 YAML 失败")?;
 
     if yaml_docs.is_empty() {
         warn!("基础配置文件为空，使用默认配置");
@@ -34,8 +33,7 @@ pub async fn load_base_config() -> Result<Value> {
         return Ok(default_config);
     }
 
-    let config = crate::config::yaml_to_json(&yaml_docs[0])
-        .context("转换基础配置为 JSON 失败")?;
+    let config = crate::config::yaml_to_json(&yaml_docs[0]).context("转换基础配置为 JSON 失败")?;
 
     info!("基础配置加载成功");
     Ok(config)
@@ -48,14 +46,12 @@ pub async fn save_base_config(config: &Value) -> Result<()> {
         fs::create_dir_all(parent).context("创建配置目录失败")?;
     }
 
-    let yaml_value: serde_yaml::Value = serde_json::from_value(config.clone())
-        .context("转换配置格式失败")?;
+    let yaml_value: serde_yaml::Value =
+        serde_json::from_value(config.clone()).context("转换配置格式失败")?;
 
-    let yaml_content = serde_yaml::to_string(&yaml_value)
-        .context("序列化 YAML 失败")?;
+    let yaml_content = serde_yaml::to_string(&yaml_value).context("序列化 YAML 失败")?;
 
-    fs::write(&base_config_path, yaml_content)
-        .context("写入基础配置失败")?;
+    fs::write(&base_config_path, yaml_content).context("写入基础配置失败")?;
 
     info!("基础配置已保存: {:?}", base_config_path);
     Ok(())
@@ -63,16 +59,15 @@ pub async fn save_base_config(config: &Value) -> Result<()> {
 
 pub async fn reset_to_default() -> Result<()> {
     info!("重置基础配置为默认值");
-    
+
     let base_config_path = get_base_config_path()?;
     if base_config_path.exists() {
         let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
         fs::create_dir_all(&backup_dir)?;
-        
+
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let backup_path = backup_dir.join(format!("base_config_before_reset_{}.yaml", timestamp));
-        fs::copy(&base_config_path, &backup_path)
-            .context("备份当前基础配置失败")?;
+        fs::copy(&base_config_path, &backup_path).context("备份当前基础配置失败")?;
         info!("已备份当前基础配置到: {:?}", backup_path);
     }
 
@@ -224,23 +219,21 @@ pub async fn merge_with_proxies(proxies: Vec<Value>, proxy_names: Vec<String>) -
 
 pub async fn export_base_config() -> Result<String> {
     let config = load_base_config().await?;
-    let yaml_value: serde_yaml::Value = serde_json::from_value(config)
-        .context("转换配置格式失败")?;
-    let yaml_content = serde_yaml::to_string(&yaml_value)
-        .context("序列化 YAML 失败")?;
+    let yaml_value: serde_yaml::Value =
+        serde_json::from_value(config).context("转换配置格式失败")?;
+    let yaml_content = serde_yaml::to_string(&yaml_value).context("序列化 YAML 失败")?;
     Ok(yaml_content)
 }
 
 pub async fn import_base_config(yaml_content: &str) -> Result<()> {
-    let yaml_docs = yaml_rust::YamlLoader::load_from_str(yaml_content)
-        .context("解析导入的 YAML 失败")?;
+    let yaml_docs =
+        yaml_rust::YamlLoader::load_from_str(yaml_content).context("解析导入的 YAML 失败")?;
 
     if yaml_docs.is_empty() {
         return Err(anyhow::anyhow!("导入的配置为空"));
     }
 
-    let config = crate::config::yaml_to_json(&yaml_docs[0])
-        .context("转换配置格式失败")?;
+    let config = crate::config::yaml_to_json(&yaml_docs[0]).context("转换配置格式失败")?;
 
     if config.get("proxies").is_some() || config.get("proxy-groups").is_some() {
         warn!("导入的配置包含代理节点，将被忽略");
@@ -256,7 +249,7 @@ pub async fn import_base_config(yaml_content: &str) -> Result<()> {
     if base_config_path.exists() {
         let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
         fs::create_dir_all(&backup_dir)?;
-        
+
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let backup_path = backup_dir.join(format!("base_config_before_import_{}.yaml", timestamp));
         fs::copy(&base_config_path, &backup_path)?;

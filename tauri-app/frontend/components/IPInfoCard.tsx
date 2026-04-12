@@ -37,13 +37,14 @@ interface IPInfoCardProps {
 }
 
 const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotification }) => {
+  void showNotification;
   const { t } = useTranslation();
   const [ipInfo, setIpInfo] = useState<ExtendedIPInfo | null>(null);
   const [ipLoading, setIpLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
-  const loadIpInfo = useCallback(async (forceRefresh = false, showWarning = false) => {
+  const loadIpInfo = useCallback(async (forceRefresh = false) => {
     if (!isTauriEnv()) return;
     
     const cachedData = localStorage.getItem('ipInfo');
@@ -89,15 +90,15 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
   useEffect(() => {
     if (isRunning) {
       const timer = setTimeout(() => {
-        loadIpInfo(true, false);
+        void loadIpInfo(true);
       }, 3000);
       return () => clearTimeout(timer);
     } else {
-      loadIpInfo(true, false);
+      void loadIpInfo(true);
     }
   }, [isRunning, loadIpInfo]);
 
-  const getCountryFlag = (countryCode: string) => {
+  const getCountryFlag = (countryCode?: string) => {
     if (!countryCode || countryCode.length !== 2) return '🌍';
     const codePoints = countryCode
       .toUpperCase()
@@ -113,7 +114,7 @@ const IPInfoCard: React.FC<IPInfoCardProps> = React.memo(({ isRunning, showNotif
           <Typography variant="h6">
             IP 信息
           </Typography>
-          <IconButton onClick={() => loadIpInfo(true, false)} disabled={ipLoading} size="small">
+          <IconButton onClick={() => void loadIpInfo(true)} disabled={ipLoading} size="small">
             <Refresh />
           </IconButton>
         </Box>

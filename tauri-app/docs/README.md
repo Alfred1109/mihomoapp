@@ -65,7 +65,10 @@ npm run prepare:resources
 # 4. 开发模式运行
 npm run tauri:dev
 
-# 5. 构建生产版本
+# 5. Linux 构建 DEB 包
+npm run tauri:build:deb
+
+# 6. 构建全部生产版本
 npm run tauri:build
 ```
 
@@ -75,30 +78,38 @@ npm run tauri:build
 
 ### 项目结构
 
-```
+```text
 tauri-app/
-├── src/                          # React 前端
-│   ├── components/
-│   │   ├── Dashboard.tsx        # 仪表盘
-│   │   ├── ConfigManager.tsx    # 配置管理
-│   │   ├── ProxyManager.tsx     # 代理管理
-│   │   └── ConnectionMonitor.tsx # 连接监控
+├── frontend/                     # React 前端
+│   ├── components/               # 功能组件
+│   ├── store/                    # Zustand 全局事件状态
+│   ├── hooks/                    # Tauri/通知等通用 hooks
+│   ├── utils/                    # 性能、环境检测等工具
+│   ├── i18n/                     # 国际化
 │   ├── App.tsx
 │   └── main.tsx
-├── backend/                    # Tauri 后端
+├── backend/                      # Tauri + Rust 后端
 │   ├── src/
-│   │   ├── main.rs              # 主程序入口
-│   │   ├── config.rs            # 配置管理
-│   │   ├── mihomo.rs            # mihomo 核心逻辑
-│   │   ├── backup.rs            # 备份管理
-│   │   └── validator.rs         # 配置验证
-│   ├── resources/               # 打包资源
-│   │   ├── mihomo              # Linux 二进制
-│   │   ├── mihomo.exe          # Windows 二进制
-│   │   └── winsw.exe           # Windows 服务管理
-│   └── tauri.conf.json         # Tauri 配置
-├── prepare-resources.ps1        # Windows 资源准备
-├── prepare-resources.sh         # Linux 资源准备
+│   │   ├── commands/             # Tauri 命令分层
+│   │   │   ├── config_subscription.rs
+│   │   │   ├── runtime_system.rs
+│   │   │   ├── service.rs
+│   │   │   └── mod.rs
+│   │   ├── main.rs               # 应用装配、托盘、窗口生命周期
+│   │   ├── mihomo.rs             # Mihomo API/进程逻辑
+│   │   ├── subscription.rs       # 订阅拉取与配置生成
+│   │   ├── config.rs             # 运行时配置
+│   │   ├── base_config.rs        # 基础配置
+│   │   ├── config_manager.rs     # 文件锁与原子写入
+│   │   ├── backup.rs             # 备份管理
+│   │   ├── validator.rs          # 配置验证
+│   │   ├── events.rs             # Tauri 事件定义
+│   │   └── watchdog.rs           # 服务健康监控
+│   ├── resources/                # 打包资源
+│   └── tauri.conf.json
+├── docs/
+├── prepare-resources.ps1
+├── prepare-resources.sh
 └── package.json
 ```
 
@@ -113,11 +124,27 @@ npm run tauri:dev        # 启动完整应用（热重载）
 
 # 构建
 npm run build            # 构建前端
+npm run tauri:build:deb  # 构建并修复 Linux DEB 依赖
 npm run tauri:build      # 构建完整应用
+
+# 质量检查
+npm run type-check       # TypeScript 类型检查
+npm run lint             # ESLint
+npm run check:all        # 前端检查组合
 
 # 资源管理
 npm run prepare:resources  # 下载 mihomo 二进制
 ```
+
+### 架构说明
+
+- `frontend/App.tsx` 负责应用壳层和事件监听初始化
+- `frontend/store/appStore.ts` 负责接收后端 `Tauri events`
+- `backend/src/main.rs` 只做应用装配和命令注册
+- `backend/src/commands/` 是 Tauri 命令层
+- `backend/src/subscription.rs`、`config.rs`、`mihomo.rs` 等负责业务实现
+
+更完整的分层说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
 ### 配置文件位置
 
@@ -209,8 +236,14 @@ chmod +x backend/resources/mihomo
 ### 构建安装包
 
 ```bash
+# Linux DEB
+npm run tauri:build:deb
+
+# 全部目标
 npm run tauri:build
 ```
+
+`tauri:build:deb` 会在 Tauri 1.x 构建完成后修正 Debian 控制文件中的 `Depends` 字段，避免 Ubuntu 24.04 上被额外写入 `libwebkit2gtk-4.0-37` 硬依赖而安装失败。
 
 **输出位置**:
 - **Windows**: `backend/target/release/bundle/msi/` 或 `nsis/`

@@ -44,7 +44,8 @@ impl ConfigManager {
         }
 
         let file = File::open(&self.config_path).context("Failed to open config file")?;
-        file.lock_shared().context("Failed to acquire shared lock")?;
+        file.lock_shared()
+            .context("Failed to acquire shared lock")?;
         let _file_guard = FileGuard::new(file);
 
         let content =
@@ -69,7 +70,11 @@ impl ConfigManager {
         self.write_config_with_options(config, true).await
     }
 
-    pub async fn write_config_with_options(&self, config: serde_json::Value, create_backup: bool) -> Result<()> {
+    pub async fn write_config_with_options(
+        &self,
+        config: serde_json::Value,
+        create_backup: bool,
+    ) -> Result<()> {
         let _guard = self.lock.write().await;
 
         if create_backup {
@@ -93,7 +98,9 @@ impl ConfigManager {
                 .open(&temp_path)
                 .context("Failed to open temp file")?;
 
-            temp_file.lock_exclusive().context("Failed to acquire exclusive lock")?;
+            temp_file
+                .lock_exclusive()
+                .context("Failed to acquire exclusive lock")?;
             let _file_guard = FileGuard::new(temp_file);
         }
 

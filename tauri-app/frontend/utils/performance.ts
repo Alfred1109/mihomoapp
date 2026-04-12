@@ -1,3 +1,5 @@
+import type { ProxiesResponse } from '../types';
+
 /**
  * 性能优化工具函数
  * 借鉴自 nyanpasu 的性能优化技术
@@ -6,11 +8,15 @@
 /**
  * 防抖函数 - 延迟执行，只执行最后一次
  */
-export function debounce<T extends (...args: any[]) => any>(
+type Procedure<TArgs extends unknown[] = unknown[], TResult = void> = (
+  ...args: TArgs
+) => TResult;
+
+export function debounce<T extends Procedure>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
-  let timeout: number | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   
   return function executedFunction(...args: Parameters<T>) {
     const later = () => {
@@ -28,7 +34,7 @@ export function debounce<T extends (...args: any[]) => any>(
 /**
  * 节流函数 - 限制执行频率
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends Procedure>(
   func: T,
   limit: number
 ): (...args: Parameters<T>) => void {
@@ -98,8 +104,8 @@ class DataCache<T> {
 }
 
 // 导出单例缓存实例
-export const proxyCache = new DataCache<any>(30); // 30秒缓存
-export const configCache = new DataCache<any>(60); // 60秒缓存
+export const proxyCache = new DataCache<ProxiesResponse>(30); // 30秒缓存
+export const configCache = new DataCache<unknown>(60); // 60秒缓存
 
 /**
  * 延迟执行 - 避免阻塞UI

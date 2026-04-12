@@ -17,7 +17,7 @@ export interface ProxyChangeEvent {
 
 export interface SubscriptionUpdateEvent {
   subscription_id: string;
-  status: 'Active' | 'Error' | 'Updating';
+  status: string;
   proxy_count: number;
   timestamp: number;
 }
@@ -143,6 +143,7 @@ export interface DnsConfig {
 export interface TunConfig {
   enable?: boolean;
   stack?: string;
+  'device-name'?: string;
   'auto-route'?: boolean;
   'auto-detect-interface'?: boolean;
   'dns-hijack'?: string[];

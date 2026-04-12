@@ -52,6 +52,7 @@ import { save, open } from '@tauri-apps/api/dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
 import { useTranslation } from 'react-i18next';
 import { TabPanel } from './common';
+import { useAppStore } from '../store/appStore';
 import type { ConfigValue } from '../types';
 
 interface ConfigManagerProps {
@@ -60,7 +61,9 @@ interface ConfigManagerProps {
 }
 
 const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, showNotification }) => {
+  void isRunning;
   const { t } = useTranslation();
+  const lastConfigChange = useAppStore((state) => state.lastConfigChange);
   const [config, setConfig] = useState<ConfigValue | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -257,7 +260,8 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       setAutostart(autostartStatus);
       const silentStatus = await invoke<boolean>('get_silent_start_status');
       setSilentStart(silentStatus);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load app settings:', error);
     }
   };
 
@@ -327,6 +331,15 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
       setConfigText(JSON.stringify(config, null, 2));
     }
   }, [config]);
+
+  useEffect(() => {
+    if (!lastConfigChange || hasChanges) {
+      return;
+    }
+
+    void loadConfig();
+    void loadBackups();
+  }, [hasChanges, lastConfigChange, loadBackups, loadConfig]);
 
   if (!config) {
     return (
@@ -493,8 +506,8 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
                   <Grid item xs={12}>
                     <FormControl fullWidth>
                       <InputLabel>增强模式</InputLabel>
-                      <Select value={config.dns?.enhanced_mode || 'fake-ip'} label="增强模式"
-                        onChange={(e) => updateConfig('dns.enhanced_mode', e.target.value)}>
+                      <Select value={config.dns?.['enhanced-mode'] || 'fake-ip'} label="增强模式"
+                        onChange={(e) => updateConfig('dns.enhanced-mode', e.target.value)}>
                         <MenuItem value="fake-ip">Fake IP</MenuItem>
                         <MenuItem value="redir-host">Redirect Host</MenuItem>
                       </Select>

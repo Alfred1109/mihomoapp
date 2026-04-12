@@ -29,6 +29,7 @@ import {
 import { invoke } from '@tauri-apps/api/tauri';
 import { useTranslation } from 'react-i18next';
 import { proxyCache, defer } from '../utils/performance';
+import { useAppStore } from '../store/appStore';
 import type { ProxyNode, ProxyGroup, ProxiesResponse } from '../types';
 
 interface ProxyManagerProps {
@@ -41,6 +42,7 @@ type SortOrder = 'asc' | 'desc';
 
 const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showNotification }) => {
   const { t } = useTranslation();
+  const lastProxyChange = useAppStore((state) => state.lastProxyChange);
   const [proxies, setProxies] = useState<{ [key: string]: ProxyNode | ProxyGroup }>({});
   const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
@@ -49,7 +51,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [proxyHistory, setProxyHistory] = useState<Array<{ groupName: string; nodeName: string; time: string }>>([]);
 
-  const extractProxyGroups = (response: ProxiesResponse) => {
+  const extractProxyGroups = useCallback((response: ProxiesResponse) => {
     const excludeBuiltinGroups = ['GLOBAL', 'COMPATIBLE', 'PASS', 'DIRECT', 'REJECT', 'REJECT-DROP', 'auto'];
     const proxyGroups: ProxyGroup[] = [];
     Object.entries(response.proxies || {}).forEach(([name, proxy]) => {
@@ -79,9 +81,9 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       const hasProxy = proxyGroups.some(g => g.name === 'PROXY');
       setSelectedGroup(hasProxy ? 'PROXY' : proxyGroups[0].name);
     }
-  };
+  }, []);
 
-  const loadProxies = async () => {
+  const loadProxies = useCallback(async () => {
     if (!isRunning) return;
     
     const cached = proxyCache.get('proxies');
@@ -94,7 +96,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           proxyCache.set('proxies', response);
           setProxies(response.proxies || {});
           extractProxyGroups(response);
-        } catch {
+        } catch (error) {
+          console.warn('Failed to refresh proxy cache in background:', error);
         }
       }, 100);
       return;
@@ -111,7 +114,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     } finally {
       setLoading(false);
     }
-  };
+  }, [extractProxyGroups, isRunning, showNotification, t]);
 
   const handleTestAllProxies = async () => {
     try {
@@ -143,7 +146,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       
       try {
         localStorage.setItem('proxyHistory', JSON.stringify(newHistory));
-      } catch {
+      } catch (error) {
+        console.warn('Failed to persist proxy history:', error);
       }
       
       showNotification(t('proxy.switchSuccess'), 'success');
@@ -190,10 +194,11 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
         case 'name':
           compareResult = a.localeCompare(b);
           break;
-        case 'type':
+        case 'type': {
           compareResult = (nodeA?.type || '').localeCompare(nodeB?.type || '');
           break;
-        case 'delay':
+        }
+        case 'delay': {
           // 使用最新的测速记录（Mihomo的history是倒序的，最新在索引0）
           const historyA = nodeA?.history;
           const historyB = nodeB?.history;
@@ -201,11 +206,13 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
           const delayB = (historyB && historyB.length > 0) ? historyB[0]?.delay : 999999;
           compareResult = (delayA || 999999) - (delayB || 999999);
           break;
-        case 'status':
+        }
+        case 'status': {
           const statusA = nodeA?.alive === true ? 1 : 0;
           const statusB = nodeB?.alive === true ? 1 : 0;
           compareResult = statusB - statusA; // 在线的排前面
           break;
+        }
       }
       
       return sortOrder === 'asc' ? compareResult : -compareResult;
@@ -220,14 +227,24 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       if (saved) {
         setProxyHistory(JSON.parse(saved));
       }
-    } catch {
+    } catch (error) {
+      console.warn('Failed to restore proxy history from localStorage:', error);
     }
     
     if (isRunning) {
       const interval = setInterval(loadProxies, 30000);
       return () => clearInterval(interval);
     }
-  }, [isRunning]);
+  }, [isRunning, loadProxies]);
+
+  useEffect(() => {
+    if (!isRunning || !lastProxyChange) {
+      return;
+    }
+
+    proxyCache.clear();
+    void loadProxies();
+  }, [isRunning, lastProxyChange, loadProxies]);
 
   if (!isRunning) {
     return (

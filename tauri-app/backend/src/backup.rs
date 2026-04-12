@@ -71,13 +71,16 @@ pub async fn restore_config(backup_filename: &str) -> Result<RestoreResult> {
     fs::copy(&backup_path, &config_path).context("Failed to restore backup")?;
 
     let message = if service_running {
-        format!("✓ 配置已从备份恢复: {}。请重启服务以应用更改。", backup_filename)
+        format!(
+            "✓ 配置已从备份恢复: {}。请重启服务以应用更改。",
+            backup_filename
+        )
     } else {
         format!("✓ 配置已从备份恢复: {}", backup_filename)
     };
 
     println!("{}", message);
-    
+
     Ok(RestoreResult {
         success: true,
         service_running,

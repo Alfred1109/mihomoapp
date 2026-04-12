@@ -47,6 +47,7 @@ import { invoke } from '@tauri-apps/api/tauri';
 import { save, open } from '@tauri-apps/api/dialog';
 import { writeTextFile, readTextFile } from '@tauri-apps/api/fs';
 import { useTranslation } from 'react-i18next';
+import { useAppStore } from '../store/appStore';
 
 import type { Subscription } from '../types';
 
@@ -56,6 +57,7 @@ interface SubscriptionManagerProps {
 
 const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ showNotification }) => {
   const { t } = useTranslation();
+  const lastSubscriptionUpdate = useAppStore((state) => state.lastSubscriptionUpdate);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -88,7 +90,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     try {
       const result = await invoke<string[]>('list_subscription_backups');
       setSubscriptionBackups(result);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load subscription backups:', error);
     }
   }, []);
 
@@ -240,6 +243,15 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     loadSubscriptions();
     loadBackups();
   }, [loadSubscriptions, loadBackups]);
+
+  useEffect(() => {
+    if (!lastSubscriptionUpdate) {
+      return;
+    }
+
+    void loadSubscriptions();
+    void loadBackups();
+  }, [lastSubscriptionUpdate, loadBackups, loadSubscriptions]);
 
   return (
     <Box>

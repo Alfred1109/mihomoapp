@@ -91,10 +91,12 @@ function App() {
             processId: null,
             timestamp: Date.now(),
           });
-        } catch {
+        } catch (error) {
+          console.warn('Failed to check mihomo direct status:', error);
         }
       }
-    } catch {
+    } catch (error) {
+      console.warn('Failed to check mihomo service status:', error);
     }
   }, [setMihomoStatus]);
 

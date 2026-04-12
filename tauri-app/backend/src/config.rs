@@ -43,12 +43,17 @@ pub async fn save_config_no_backup(config: serde_json::Value) -> Result<()> {
 
 pub async fn reset_to_default_config() -> Result<String> {
     tracing::info!("开始重置配置为默认值...");
-    
+
     crate::base_config::reset_to_default().await?;
-    
-    let storage = crate::subscription::get_subscriptions().await.unwrap_or_default();
-    let active_subscriptions: Vec<_> = storage.iter()
-        .filter(|s| matches!(s.status, crate::subscription::SubscriptionStatus::Active) && s.proxy_count > 0)
+
+    let storage = crate::subscription::get_subscriptions()
+        .await
+        .unwrap_or_default();
+    let active_subscriptions: Vec<_> = storage
+        .iter()
+        .filter(|s| {
+            matches!(s.status, crate::subscription::SubscriptionStatus::Active) && s.proxy_count > 0
+        })
         .collect();
 
     if active_subscriptions.is_empty() {
@@ -61,15 +66,13 @@ pub async fn reset_to_default_config() -> Result<String> {
         }
         runtime_config["config_version"] = serde_json::json!(2);
         save_config(runtime_config).await?;
-        
+
         tracing::info!("配置已重置为默认值（无活动订阅）");
         return Ok("配置已重置为默认值。请添加订阅链接或从备份恢复订阅。".to_string());
     }
 
-    let subscription_ids: Vec<String> = active_subscriptions.iter()
-        .map(|s| s.id.clone())
-        .collect();
-    
+    let subscription_ids: Vec<String> = active_subscriptions.iter().map(|s| s.id.clone()).collect();
+
     match crate::subscription::generate_config_from_subscriptions(subscription_ids).await {
         Ok(_) => {
             tracing::info!("配置已重置为默认值并重新生成（使用本地缓存的订阅）");
@@ -86,8 +89,11 @@ pub async fn reset_to_default_config() -> Result<String> {
             }
             runtime_config["config_version"] = serde_json::json!(2);
             save_config(runtime_config).await?;
-            
-            Ok(format!("配置已重置为默认值，但重新生成订阅配置失败: {}。请手动更新订阅。", e))
+
+            Ok(format!(
+                "配置已重置为默认值，但重新生成订阅配置失败: {}。请手动更新订阅。",
+                e
+            ))
         }
     }
 }
@@ -138,7 +144,11 @@ async fn upgrade_config_if_needed(config: &mut serde_json::Value) -> Result<()> 
         return Ok(());
     }
 
-    tracing::info!("检测到旧配置版本 {}，升级到版本 {}", current_version, CONFIG_VERSION);
+    tracing::info!(
+        "检测到旧配置版本 {}，升级到版本 {}",
+        current_version,
+        CONFIG_VERSION
+    );
 
     if current_version < 2 {
         upgrade_to_v2(config).await?;
@@ -201,11 +211,10 @@ async fn upgrade_to_v2(config: &mut serde_json::Value) -> Result<()> {
         });
 
         if !has_geolocation_rule {
-            if let Some(pos) = rules.iter().position(|r| {
-                r.as_str()
-                    .map(|s| s.starts_with("GEOIP,"))
-                    .unwrap_or(false)
-            }) {
+            if let Some(pos) = rules
+                .iter()
+                .position(|r| r.as_str().map(|s| s.starts_with("GEOIP,")).unwrap_or(false))
+            {
                 rules.insert(pos, serde_json::json!("GEOSITE,geolocation-!cn,PROXY"));
             }
         }

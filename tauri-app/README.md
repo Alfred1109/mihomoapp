@@ -36,7 +36,10 @@ npm run prepare:resources
 # 3. 开发模式运行
 npm run tauri:dev
 
-# 4. 构建生产版本
+# 4. Linux 构建 DEB 包
+npm run tauri:build:deb
+
+# 5. 构建全部生产版本
 npm run tauri:build
 ```
 
@@ -66,6 +69,7 @@ tauri-app/
 ```bash
 npm run dev                 # 前端开发服务器
 npm run tauri:dev          # Tauri 开发模式
+npm run tauri:build:deb    # 构建并修复 Linux DEB 依赖
 npm run tauri:build        # 构建应用
 npm run prepare:resources  # 准备 mihomo 二进制
 ```

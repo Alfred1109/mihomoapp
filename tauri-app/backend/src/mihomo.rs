@@ -116,7 +116,7 @@ pub async fn start_mihomo() -> Result<u32> {
         #[allow(unused_imports)]
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        
+
         let mut command = TokioCommand::new(&mihomo_path);
         command
             .args(["-f", &config_path])
@@ -125,7 +125,7 @@ pub async fn start_mihomo() -> Result<u32> {
             .creation_flags(CREATE_NO_WINDOW);
         command
     };
-    
+
     // 在非 Windows 系统上正常启动
     #[cfg(not(target_os = "windows"))]
     let mut cmd = {
@@ -136,7 +136,7 @@ pub async fn start_mihomo() -> Result<u32> {
             .stderr(Stdio::piped());
         command
     };
-    
+
     match cmd.spawn() {
         Ok(mut cmd) => {
             // Give it a moment to start
@@ -172,21 +172,17 @@ pub async fn start_mihomo() -> Result<u32> {
                     let pid = cmd.id().unwrap_or(0);
                     Ok(pid)
                 }
-                Err(e) => {
-                    Err(anyhow::anyhow!(
-                        "Failed to check mihomo process status: {}",
-                        e
-                    ))
-                }
+                Err(e) => Err(anyhow::anyhow!(
+                    "Failed to check mihomo process status: {}",
+                    e
+                )),
             }
         }
-        Err(e) => {
-            Err(anyhow::anyhow!(
-                "Failed to start mihomo with path '{}': {}",
-                mihomo_path.display(),
-                e
-            ))
-        }
+        Err(e) => Err(anyhow::anyhow!(
+            "Failed to start mihomo with path '{}': {}",
+            mihomo_path.display(),
+            e
+        )),
     }
 }
 
@@ -450,11 +446,11 @@ pub async fn test_group_delay(group_name: &str) -> Result<()> {
 pub async fn test_proxy_delay(proxy_name: &str, timeout: u32, test_url: &str) -> Result<u32> {
     let client = reqwest::Client::new();
     let response = client
-        .get(format!("http://127.0.0.1:9090/proxies/{}/delay", proxy_name))
-        .query(&[
-            ("timeout", timeout.to_string().as_str()),
-            ("url", test_url),
-        ])
+        .get(format!(
+            "http://127.0.0.1:9090/proxies/{}/delay",
+            proxy_name
+        ))
+        .query(&[("timeout", timeout.to_string().as_str()), ("url", test_url)])
         .send()
         .await
         .context("Failed to test proxy delay")?;
@@ -470,7 +466,7 @@ pub async fn test_proxy_delay(proxy_name: &str, timeout: u32, test_url: &str) ->
     let delay = result["delay"]
         .as_u64()
         .ok_or_else(|| anyhow::anyhow!("Invalid delay response"))?;
-    
+
     Ok(delay as u32)
 }
 
@@ -508,13 +504,11 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
 
     // 使用 futures 并发测试，限制并发数为 10
     use futures::stream::{self, StreamExt};
-    
+
     let test_results: Vec<(String, Result<u32>)> = stream::iter(proxy_nodes.iter().cloned())
-        .map(|proxy_name: String| {
-            async move {
-                let result = test_proxy_delay(&proxy_name, timeout, test_url).await;
-                (proxy_name, result)
-            }
+        .map(|proxy_name: String| async move {
+            let result = test_proxy_delay(&proxy_name, timeout, test_url).await;
+            (proxy_name, result)
         })
         .buffer_unordered(10) // 限制并发数为10
         .collect()
@@ -535,7 +529,10 @@ pub async fn test_all_groups_delay() -> Result<serde_json::Value> {
         }
     }
 
-    info!("✅ 批量测速完成！成功: {}/{} 个节点", success_count, total_nodes);
+    info!(
+        "✅ 批量测速完成！成功: {}/{} 个节点",
+        success_count, total_nodes
+    );
 
     Ok(serde_json::json!({
         "total": total_nodes,

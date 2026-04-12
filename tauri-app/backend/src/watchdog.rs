@@ -51,16 +51,16 @@ impl ProcessWatchdog {
         let mut process_id = self.process_id.write().await;
         *process_id = None;
         drop(process_id);
-        
+
         // 设置手动停止标志
         let mut manual_stop = self.manual_stop.write().await;
         *manual_stop = true;
         drop(manual_stop);
-        
+
         // 同时禁用自动重启，防止竞态条件
         let mut auto_restart = self.auto_restart.write().await;
         *auto_restart = false;
-        
+
         info!("Watchdog cleared process tracking (manual stop, auto-restart disabled)");
     }
 
@@ -81,11 +81,11 @@ impl ProcessWatchdog {
         let mut auto_restart = self.auto_restart.write().await;
         *auto_restart = true;
         drop(auto_restart);
-        
+
         // 清除手动停止标志
         let mut manual_stop = self.manual_stop.write().await;
         *manual_stop = false;
-        
+
         info!("Auto-restart re-enabled (manual stop flag cleared)");
     }
 

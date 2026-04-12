@@ -64,7 +64,7 @@ pub async fn add_subscription(
     url: String,
     user_agent: Option<String>,
     use_proxy: bool,
-) -> Result<()> {
+) -> Result<String> {
     let mut storage = load_subscriptions().await.unwrap_or_default();
 
     let id = Uuid::new_v4().to_string();
@@ -89,7 +89,7 @@ pub async fn add_subscription(
         .insert(subscription.id.clone(), subscription);
     save_subscriptions(&storage).await?;
 
-    Ok(())
+    Ok(id)
 }
 
 pub async fn get_subscriptions() -> Result<Vec<Subscription>> {
@@ -252,15 +252,14 @@ async fn load_proxies_from_profile(id: &str) -> Result<Vec<serde_json::Value>> {
 
 pub async fn export_subscriptions() -> Result<String> {
     let storage = load_subscriptions().await.unwrap_or_default();
-    let json_content = serde_json::to_string_pretty(&storage)
-        .context("序列化订阅数据失败")?;
+    let json_content = serde_json::to_string_pretty(&storage).context("序列化订阅数据失败")?;
     info!("导出 {} 个订阅链接", storage.subscriptions.len());
     Ok(json_content)
 }
 
 pub async fn import_subscriptions(json_content: &str) -> Result<u32> {
-    let imported_storage: SubscriptionStorage = serde_json::from_str(json_content)
-        .context("解析导入的订阅数据失败")?;
+    let imported_storage: SubscriptionStorage =
+        serde_json::from_str(json_content).context("解析导入的订阅数据失败")?;
 
     if imported_storage.subscriptions.is_empty() {
         return Err(anyhow::anyhow!("导入的数据中没有订阅链接"));
@@ -270,37 +269,37 @@ pub async fn import_subscriptions(json_content: &str) -> Result<u32> {
     if subscriptions_path.exists() {
         let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
         std::fs::create_dir_all(&backup_dir)?;
-        
+
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup_path = backup_dir.join(format!("subscriptions_before_import_{}.json", timestamp));
+        let backup_path =
+            backup_dir.join(format!("subscriptions_before_import_{}.json", timestamp));
         std::fs::copy(&subscriptions_path, &backup_path)?;
         info!("已备份当前订阅数据");
     }
 
     let count = imported_storage.subscriptions.len() as u32;
     save_subscriptions(&imported_storage).await?;
-    
+
     info!("成功导入 {} 个订阅链接", count);
     Ok(count)
 }
 
 pub async fn backup_subscriptions() -> Result<String> {
     let subscriptions_path = get_subscriptions_path()?;
-    
+
     if !subscriptions_path.exists() {
         return Err(anyhow::anyhow!("没有订阅数据可备份"));
     }
 
     let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
     std::fs::create_dir_all(&backup_dir)?;
-    
+
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
     let backup_filename = format!("subscriptions_{}.json", timestamp);
     let backup_path = backup_dir.join(&backup_filename);
-    
-    std::fs::copy(&subscriptions_path, &backup_path)
-        .context("备份订阅数据失败")?;
-    
+
+    std::fs::copy(&subscriptions_path, &backup_path).context("备份订阅数据失败")?;
+
     info!("订阅数据已备份到: {:?}", backup_path);
     Ok(backup_filename)
 }
@@ -335,8 +334,7 @@ pub async fn restore_subscriptions_from_backup(backup_filename: &str) -> Result<
         return Err(anyhow::anyhow!("备份文件不存在: {}", backup_filename));
     }
 
-    let content = std::fs::read_to_string(&backup_path)
-        .context("读取备份文件失败")?;
+    let content = std::fs::read_to_string(&backup_path).context("读取备份文件失败")?;
 
     import_subscriptions(&content).await
 }
@@ -414,9 +412,10 @@ async fn fetch_and_save_subscription(
 }
 
 fn generate_profile_yaml(raw_content: &str, proxies: &[serde_json::Value]) -> Result<String> {
-    let decoded_content = if let Ok(decoded) =
-        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw_content.trim())
-    {
+    let decoded_content = if let Ok(decoded) = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        raw_content.trim(),
+    ) {
         String::from_utf8(decoded).unwrap_or_else(|_| raw_content.to_string())
     } else {
         raw_content.to_string()
@@ -565,7 +564,10 @@ fn parse_proxy_url(url: &str) -> Result<serde_json::Value> {
     } else if url.starts_with("hysteria2://") || url.starts_with("hy2://") {
         parse_hysteria2_url(url)
     } else {
-        Err(anyhow::anyhow!("Unsupported proxy URL format: {}", &url[..url.len().min(20)]))
+        Err(anyhow::anyhow!(
+            "Unsupported proxy URL format: {}",
+            &url[..url.len().min(20)]
+        ))
     }
 }
 
@@ -576,7 +578,12 @@ fn parse_shadowsocks_url(url: &str) -> Result<serde_json::Value> {
 
     let (main_part, name) = if let Some(idx) = url.find('#') {
         let (main, fragment) = url.split_at(idx);
-        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+        (
+            main.to_string(),
+            urlencoding::decode(&fragment[1..])
+                .unwrap_or_default()
+                .to_string(),
+        )
     } else {
         (url.to_string(), String::new())
     };
@@ -657,7 +664,9 @@ fn parse_shadowsocksr_url(url: &str) -> Result<serde_json::Value> {
 
     let parts: Vec<&str> = main_part.split(':').collect();
     if parts.len() < 6 {
-        return Err(anyhow::anyhow!("Invalid SSR URL format: insufficient parts"));
+        return Err(anyhow::anyhow!(
+            "Invalid SSR URL format: insufficient parts"
+        ));
     }
 
     let server = parts[0].to_string();
@@ -726,15 +735,17 @@ fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
         .ok_or_else(|| anyhow::anyhow!("Invalid VMess URL: missing vmess:// prefix"))?;
 
     let decoded = decode_base64_flexible(url)?;
-    let config: serde_json::Value = serde_json::from_str(&decoded)
-        .context("Failed to parse VMess JSON config")?;
+    let config: serde_json::Value =
+        serde_json::from_str(&decoded).context("Failed to parse VMess JSON config")?;
 
-    let name = config["ps"].as_str()
+    let name = config["ps"]
+        .as_str()
         .or_else(|| config["remarks"].as_str())
         .unwrap_or("VMess")
         .to_string();
 
-    let server = config["add"].as_str()
+    let server = config["add"]
+        .as_str()
         .or_else(|| config["host"].as_str())
         .ok_or_else(|| anyhow::anyhow!("VMess config missing server address"))?
         .to_string();
@@ -745,7 +756,8 @@ fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
         _ => 443,
     };
 
-    let uuid = config["id"].as_str()
+    let uuid = config["id"]
+        .as_str()
         .ok_or_else(|| anyhow::anyhow!("VMess config missing UUID"))?
         .to_string();
 
@@ -785,17 +797,18 @@ fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
     match network.as_str() {
         "ws" => {
             let mut ws_opts = serde_json::json!({});
-            
+
             let path = config["path"].as_str().unwrap_or("/");
             ws_opts["path"] = serde_json::json!(path);
-            
-            let host = config["host"].as_str()
+
+            let host = config["host"]
+                .as_str()
                 .filter(|h| !h.is_empty())
                 .unwrap_or(&server);
             ws_opts["headers"] = serde_json::json!({
                 "Host": host
             });
-            
+
             proxy["network"] = serde_json::json!("ws");
             proxy["ws-opts"] = ws_opts;
         }
@@ -831,7 +844,12 @@ fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
 
     let (main_part, name) = if let Some(idx) = url.find('#') {
         let (main, fragment) = url.split_at(idx);
-        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+        (
+            main.to_string(),
+            urlencoding::decode(&fragment[1..])
+                .unwrap_or_default()
+                .to_string(),
+        )
     } else {
         (url.to_string(), String::new())
     };
@@ -870,7 +888,7 @@ fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
             if kv.len() == 2 {
                 params.insert(
                     kv[0].to_string(),
-                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string(),
                 );
             }
         }
@@ -898,12 +916,12 @@ fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
     }
 
     let network = params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
-    
+
     match network {
         "ws" => {
             proxy["network"] = serde_json::json!("ws");
             let mut ws_opts = serde_json::json!({});
-            
+
             if let Some(path) = params.get("path") {
                 ws_opts["path"] = serde_json::json!(path);
             }
@@ -912,7 +930,7 @@ fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
                     "Host": host
                 });
             }
-            
+
             proxy["ws-opts"] = ws_opts;
         }
         "grpc" => {
@@ -946,7 +964,12 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
 
     let (main_part, name) = if let Some(idx) = url.find('#') {
         let (main, fragment) = url.split_at(idx);
-        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+        (
+            main.to_string(),
+            urlencoding::decode(&fragment[1..])
+                .unwrap_or_default()
+                .to_string(),
+        )
     } else {
         (url.to_string(), String::new())
     };
@@ -985,7 +1008,7 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
             if kv.len() == 2 {
                 params.insert(
                     kv[0].to_string(),
-                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string(),
                 );
             }
         }
@@ -1018,12 +1041,12 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
     }
 
     let network = params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
-    
+
     match network {
         "ws" => {
             proxy["network"] = serde_json::json!("ws");
             let mut ws_opts = serde_json::json!({});
-            
+
             if let Some(path) = params.get("path") {
                 ws_opts["path"] = serde_json::json!(path);
             }
@@ -1032,7 +1055,7 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
                     "Host": host
                 });
             }
-            
+
             proxy["ws-opts"] = ws_opts;
         }
         "grpc" => {
@@ -1058,7 +1081,7 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
     }
 
     let security = params.get("security").map(|s| s.as_str()).unwrap_or("");
-    
+
     match security {
         "tls" => {
             proxy["tls"] = serde_json::json!(true);
@@ -1087,7 +1110,12 @@ fn parse_hysteria2_url(url: &str) -> Result<serde_json::Value> {
 
     let (main_part, name) = if let Some(idx) = url.find('#') {
         let (main, fragment) = url.split_at(idx);
-        (main.to_string(), urlencoding::decode(&fragment[1..]).unwrap_or_default().to_string())
+        (
+            main.to_string(),
+            urlencoding::decode(&fragment[1..])
+                .unwrap_or_default()
+                .to_string(),
+        )
     } else {
         (url.to_string(), String::new())
     };
@@ -1126,7 +1154,7 @@ fn parse_hysteria2_url(url: &str) -> Result<serde_json::Value> {
             if kv.len() == 2 {
                 params.insert(
                     kv[0].to_string(),
-                    urlencoding::decode(kv[1]).unwrap_or_default().to_string()
+                    urlencoding::decode(kv[1]).unwrap_or_default().to_string(),
                 );
             }
         }
@@ -1164,49 +1192,47 @@ fn parse_hysteria2_url(url: &str) -> Result<serde_json::Value> {
 
 fn decode_base64_flexible(input: &str) -> Result<String> {
     use base64::Engine;
-    
+
     let input = input.trim();
-    
+
     if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(input) {
         if let Ok(s) = String::from_utf8(decoded) {
             return Ok(s);
         }
     }
-    
+
     if let Ok(decoded) = base64::engine::general_purpose::STANDARD_NO_PAD.decode(input) {
         if let Ok(s) = String::from_utf8(decoded) {
             return Ok(s);
         }
     }
-    
+
     if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE.decode(input) {
         if let Ok(s) = String::from_utf8(decoded) {
             return Ok(s);
         }
     }
-    
+
     if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(input) {
         if let Ok(s) = String::from_utf8(decoded) {
             return Ok(s);
         }
     }
-    
-    let sanitized = input
-        .replace('-', "+")
-        .replace('_', "/");
-    
+
+    let sanitized = input.replace('-', "+").replace('_', "/");
+
     let padded = match sanitized.len() % 4 {
         2 => format!("{}==", sanitized),
         3 => format!("{}=", sanitized),
         _ => sanitized,
     };
-    
+
     if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&padded) {
         if let Ok(s) = String::from_utf8(decoded) {
             return Ok(s);
         }
     }
-    
+
     Err(anyhow::anyhow!("Failed to decode base64 string"))
 }
 

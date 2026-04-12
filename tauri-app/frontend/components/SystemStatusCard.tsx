@@ -8,9 +8,6 @@ import {
   FormControlLabel,
   Divider,
   Chip,
-  List,
-  ListItem,
-  ListItemText,
   Alert,
   Button,
   CircularProgress,
@@ -19,7 +16,6 @@ import {
   Router,
   Speed,
   Settings,
-  CheckCircle,
   AdminPanelSettings,
   Warning,
 } from '@mui/icons-material';
@@ -43,17 +39,12 @@ interface ProxyInfo {
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunning, showNotification }) => {
   const { t } = useTranslation();
-  const { isAdmin } = useAppStore();
+  const { isAdmin, lastConfigChange, lastProxyChange } = useAppStore();
   const [tunMode, setTunMode] = useState(false);
   const [config, setConfig] = useState<ConfigValue | null>(null);
-  const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [totalProxies, setTotalProxies] = useState(0);
   const [onlineProxies, setOnlineProxies] = useState(0);
   const [tunLoading, setTunLoading] = useState(false);
-
-  useEffect(() => {
-    loadSystemStatus();
-  }, [isRunning]);
 
   const handleRestartAsAdmin = async () => {
     try {
@@ -63,7 +54,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
     }
   };
 
-  const loadSystemStatus = async () => {
+  const loadSystemStatus = useCallback(async () => {
     if (!isTauriEnv()) return;
 
     try {
@@ -72,37 +63,51 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
       setTunMode(configData.tun?.enable || false);
 
       if (isRunning) {
-        setTimeout(async () => {
-          try {
-            const proxiesData = await invoke<ProxiesResponse>('get_proxies');
-            if (proxiesData.proxies) {
-              const allProxies: ProxyInfo[] = Object.entries(proxiesData.proxies)
-                .filter(([name, proxy]) => {
-                  const excludeTypes = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'];
-                  const excludeNames = ['DIRECT', 'REJECT', 'COMPATIBLE', 'PASS', 'REJECT-DROP'];
-                  return !excludeTypes.includes(proxy.type) && !excludeNames.includes(name);
-                })
-                .map(([name, proxy]) => {
-                  const node = proxy as ProxyNode;
-                  return {
-                    name,
-                    type: node.type,
-                    delay: node.history?.[0]?.delay ?? null,
-                    alive: node.alive === true,
-                  };
-                });
-              
-              setTotalProxies(allProxies.length);
-              setOnlineProxies(allProxies.filter(p => p.alive).length);
-              setProxies(allProxies.slice(0, 5));
-            }
-          } catch {
+        try {
+          const proxiesData = await invoke<ProxiesResponse>('get_proxies');
+          if (proxiesData.proxies) {
+            const allProxies: ProxyInfo[] = Object.entries(proxiesData.proxies)
+              .filter(([name, proxy]) => {
+                const excludeTypes = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'];
+                const excludeNames = ['DIRECT', 'REJECT', 'COMPATIBLE', 'PASS', 'REJECT-DROP'];
+                return !excludeTypes.includes(proxy.type) && !excludeNames.includes(name);
+              })
+              .map(([name, proxy]) => {
+                const node = proxy as ProxyNode;
+                return {
+                  name,
+                  type: node.type,
+                  delay: node.history?.[0]?.delay ?? null,
+                  alive: node.alive === true,
+                };
+              });
+
+            setTotalProxies(allProxies.length);
+            setOnlineProxies(allProxies.filter(p => p.alive).length);
           }
-        }, 500);
+        } catch (error) {
+          console.warn('Failed to load proxy stats for system status:', error);
+        }
+      } else {
+        setTotalProxies(0);
+        setOnlineProxies(0);
       }
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load system status:', error);
     }
-  };
+  }, [isRunning]);
+
+  useEffect(() => {
+    void loadSystemStatus();
+  }, [loadSystemStatus]);
+
+  useEffect(() => {
+    if (!lastConfigChange && !lastProxyChange) {
+      return;
+    }
+
+    void loadSystemStatus();
+  }, [lastConfigChange, lastProxyChange, loadSystemStatus]);
 
   const handleTunToggle = async (enable: boolean) => {
     setTunLoading(true);
@@ -146,19 +151,6 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
     } finally {
       setTunLoading(false);
     }
-  };
-
-  const formatDelay = (delay: number | null): string => {
-    if (!delay) return 'N/A';
-    if (delay < 0) return 'Timeout';
-    return `${delay}ms`;
-  };
-
-  const getDelayColor = (delay: number | null): 'success' | 'warning' | 'error' | 'default' => {
-    if (!delay || delay < 0) return 'default';
-    if (delay < 100) return 'success';
-    if (delay < 300) return 'warning';
-    return 'error';
   };
 
   return (

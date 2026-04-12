@@ -38,6 +38,7 @@ interface ServiceControlProps {
 type ServiceStatus = 'running' | 'stopped' | 'not_installed';
 
 const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, onStatusChange, showNotification }) => {
+  void isRunning;
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus>('not_installed');
@@ -68,7 +69,8 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
     try {
       const enabled = await invoke<boolean>('get_auto_restart');
       setAutoRestart(enabled);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load auto restart setting:', error);
     }
   }, []);
 

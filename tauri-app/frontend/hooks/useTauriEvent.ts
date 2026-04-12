@@ -3,8 +3,7 @@ import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 export function useTauriEvent<T>(
   eventName: string,
-  handler: (payload: T) => void,
-  deps: React.DependencyList = []
+  handler: (payload: T) => void
 ): void {
   const handlerRef = useRef(handler);
   
@@ -36,7 +35,7 @@ export function useTauriEvent<T>(
         unlisten();
       }
     };
-  }, [eventName, ...deps]);
+  }, [eventName]);
 }
 
 export default useTauriEvent;
