@@ -264,13 +264,16 @@ fn main() {
                 }
             }
 
-            if silent_start {
+            let force_show_window = commands::runtime_system::should_force_show_window();
+
+            if silent_start && !force_show_window {
                 // 静默启动：隐藏窗口，只显示托盘图标
                 let _ = window.hide();
             } else {
                 // 正常启动：显示窗口并获得焦点
                 let _ = window.show();
                 let _ = window.set_focus();
+                commands::runtime_system::signal_elevation_handoff_ready();
             }
 
             Ok(())

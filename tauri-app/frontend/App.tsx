@@ -51,8 +51,10 @@ function App() {
     mihomoStatus, 
     isAdmin, 
     adminCheckDone, 
+    adminRestartPending,
     setIsAdmin, 
     setAdminCheckDone, 
+    setAdminRestartPending,
     setMihomoStatus, 
     initEventListeners,
     cleanupEventListeners 
@@ -119,8 +121,14 @@ function App() {
     if (!isTauriEnv()) return;
     
     try {
+      setAdminRestartPending(true);
       await invoke('restart_as_admin');
+      window.setTimeout(() => {
+        setAdminRestartPending(false);
+        showNotification(t('notifications.adminRestartTimeout'), 'warning');
+      }, 20000);
     } catch (error) {
+      setAdminRestartPending(false);
       showNotification(`${t('notifications.startError')}: ${error}`, 'error');
     }
   };
@@ -170,6 +178,7 @@ function App() {
                 size="small"
                 color="warning"
                 onClick={handleRestartAsAdmin}
+                disabled={adminRestartPending}
                 sx={{ 
                   fontSize: '0.7rem', 
                   py: 0.25, 
@@ -177,7 +186,7 @@ function App() {
                   minWidth: 'auto',
                 }}
               >
-                {t('permissions.restartAsAdmin')}
+                {adminRestartPending ? t('permissions.restartingAsAdmin') : t('permissions.restartAsAdmin')}
               </Button>
             )}
 

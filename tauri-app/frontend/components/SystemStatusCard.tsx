@@ -39,7 +39,13 @@ interface ProxyInfo {
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunning, showNotification }) => {
   const { t } = useTranslation();
-  const { isAdmin, lastConfigChange, lastProxyChange } = useAppStore();
+  const {
+    isAdmin,
+    adminRestartPending,
+    setAdminRestartPending,
+    lastConfigChange,
+    lastProxyChange,
+  } = useAppStore();
   const [tunMode, setTunMode] = useState(false);
   const [config, setConfig] = useState<ConfigValue | null>(null);
   const [totalProxies, setTotalProxies] = useState(0);
@@ -48,8 +54,14 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
 
   const handleRestartAsAdmin = async () => {
     try {
+      setAdminRestartPending(true);
       await invoke('restart_as_admin');
+      window.setTimeout(() => {
+        setAdminRestartPending(false);
+        showNotification(t('notifications.adminRestartTimeout'), 'warning');
+      }, 20000);
     } catch (error) {
+      setAdminRestartPending(false);
       showNotification(`${t('systemStatus.restartAsAdminFailed')}: ${error}`, 'error');
     }
   };
@@ -206,9 +218,10 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = React.memo(({ isRunnin
                 color="inherit" 
                 size="small"
                 onClick={handleRestartAsAdmin}
+                disabled={adminRestartPending}
                 startIcon={<AdminPanelSettings />}
               >
-                以管理员身份重启
+                {adminRestartPending ? t('permissions.restartingAsAdmin') : t('permissions.restartAsAdmin')}
               </Button>
             }
           >

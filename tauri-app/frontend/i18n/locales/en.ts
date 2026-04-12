@@ -353,12 +353,14 @@ export default {
     resetSuccess: "Reset to default successfully",
     resetError: "Failed to reset to default",
     testComplete: "Speed test complete",
-    testError: "Speed test failed"
+    testError: "Speed test failed",
+    adminRestartTimeout: "Elevation handoff timed out. Please try again and watch for the authorization prompt."
   },
   permissions: {
     admin: "Administrator",
     normal: "Normal User",
     restartAsAdmin: "Restart as Admin",
+    restartingAsAdmin: "Elevating...",
     requiresAdmin: "This operation requires admin privileges"
   }
 };

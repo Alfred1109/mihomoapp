@@ -1,6 +1,6 @@
 {
   "name": "mihomoapp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Mihomo management application built with Tauri, React, and MUI",
   "main": "frontend/main.tsx",
   "scripts": {

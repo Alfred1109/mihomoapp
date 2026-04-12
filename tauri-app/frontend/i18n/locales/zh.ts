@@ -353,12 +353,14 @@ export default {
     resetSuccess: "恢复默认配置成功",
     resetError: "恢复默认配置失败",
     testComplete: "测速完成",
-    testError: "测速失败"
+    testError: "测速失败",
+    adminRestartTimeout: "提权接管等待超时，当前窗口仍未被新实例接管，请重试并留意授权弹窗。"
   },
   permissions: {
     admin: "管理员",
     normal: "普通用户",
     restartAsAdmin: "以管理员身份重启",
+    restartingAsAdmin: "正在提权中",
     requiresAdmin: "此操作需要管理员权限"
   }
 };

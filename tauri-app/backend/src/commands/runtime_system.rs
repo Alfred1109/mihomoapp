@@ -1,8 +1,67 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use tauri::{AppHandle, State};
 
 use crate::{backup, events, mihomo, validator, watchdog};
+
+const FORCE_SHOW_WINDOW_ARG: &str = "--force-show-window";
+const ELEVATION_HANDOFF_PREFIX: &str = "--elevation-handoff=";
+
+pub fn should_force_show_window() -> bool {
+    std::env::args().any(|arg| arg == FORCE_SHOW_WINDOW_ARG)
+}
+
+pub fn signal_elevation_handoff_ready() {
+    if let Some(path) = get_elevation_handoff_file() {
+        let _ = std::fs::write(&path, std::process::id().to_string());
+    }
+}
+
+fn get_elevation_handoff_file() -> Option<PathBuf> {
+    std::env::args_os().find_map(|arg| {
+        let arg = arg.to_string_lossy();
+        arg.strip_prefix(ELEVATION_HANDOFF_PREFIX)
+            .map(PathBuf::from)
+    })
+}
+
+fn build_elevation_handoff_file() -> PathBuf {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+
+    std::env::temp_dir().join(format!(
+        "mihomo-manager-elevation-{}-{}.ready",
+        std::process::id(),
+        timestamp
+    ))
+}
+
+fn wait_for_elevated_instance_and_exit(handoff_file: PathBuf) {
+    std::thread::spawn(move || {
+        for _ in 0..150 {
+            if handoff_file.exists() {
+                let _ = std::fs::remove_file(&handoff_file);
+                std::process::exit(0);
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        let _ = std::fs::remove_file(&handoff_file);
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn to_powershell_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn to_shell_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
 
 #[tauri::command]
 pub async fn get_mihomo_status() -> Result<bool, String> {
@@ -268,17 +327,40 @@ pub async fn restart_as_admin() -> Result<String, String> {
 
         let current_exe =
             std::env::current_exe().map_err(|e| format!("获取当前程序路径失败: {}", e))?;
+        let handoff_file = build_elevation_handoff_file();
+        let handoff_arg = format!(
+            "{}{}",
+            ELEVATION_HANDOFF_PREFIX,
+            handoff_file.to_string_lossy()
+        );
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; Start-Process -FilePath {} -ArgumentList @({}, {}) -Verb RunAs | Out-Null",
+            to_powershell_single_quoted(&current_exe.to_string_lossy()),
+            to_powershell_single_quoted(FORCE_SHOW_WINDOW_ARG),
+            to_powershell_single_quoted(&handoff_arg)
+        );
 
-        let result = Command::new("powershell")
-            .args([
-                "-Command",
-                &format!("Start-Process '{}' -Verb RunAs", current_exe.display()),
-            ])
-            .spawn();
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output();
 
-        match result {
-            Ok(_) => {
-                std::process::exit(0);
+        match output {
+            Ok(output) if output.status.success() => {
+                wait_for_elevated_instance_and_exit(handoff_file);
+                Ok("正在以管理员身份重新启动".to_string())
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let details = if !stderr.is_empty() { stderr } else { stdout };
+                Err(format!(
+                    "以管理员身份重启失败{}",
+                    if details.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", details)
+                    }
+                ))
             }
             Err(e) => Err(format!("以管理员身份重启失败: {}", e)),
         }
@@ -290,6 +372,12 @@ pub async fn restart_as_admin() -> Result<String, String> {
 
         let current_exe =
             std::env::current_exe().map_err(|e| format!("获取当前程序路径失败: {}", e))?;
+        let handoff_file = build_elevation_handoff_file();
+        let handoff_arg = format!(
+            "{}{}",
+            ELEVATION_HANDOFF_PREFIX,
+            handoff_file.to_string_lossy()
+        );
 
         let display = std::env::var("DISPLAY").unwrap_or(":0".to_string());
         let xauth = std::env::var("XAUTHORITY").unwrap_or_else(|_| {
@@ -298,20 +386,63 @@ pub async fn restart_as_admin() -> Result<String, String> {
         let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
         let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
 
+        let mut env_assignments = vec![
+            format!("DISPLAY={}", to_shell_single_quoted(&display)),
+            format!("XAUTHORITY={}", to_shell_single_quoted(&xauth)),
+            format!("GDK_BACKEND={}", to_shell_single_quoted("x11,wayland")),
+            format!(
+                "WEBKIT_DISABLE_COMPOSITING_MODE={}",
+                to_shell_single_quoted("1")
+            ),
+            format!(
+                "WEBKIT_DISABLE_DMABUF_RENDERER={}",
+                to_shell_single_quoted("1")
+            ),
+        ];
+
+        if !wayland_display.is_empty() {
+            env_assignments.push(format!(
+                "WAYLAND_DISPLAY={}",
+                to_shell_single_quoted(&wayland_display)
+            ));
+        }
+
+        if !session_type.is_empty() {
+            env_assignments.push(format!(
+                "XDG_SESSION_TYPE={}",
+                to_shell_single_quoted(&session_type)
+            ));
+        }
+
         let launch_cmd = format!(
-            "DISPLAY={} XAUTHORITY={} WAYLAND_DISPLAY={} XDG_SESSION_TYPE={} GDK_BACKEND=x11,wayland {}",
-            display, xauth, wayland_display, session_type, current_exe.display()
+            "env {} nohup {} {} {} >/dev/null 2>&1 &",
+            env_assignments.join(" "),
+            to_shell_single_quoted(&current_exe.to_string_lossy()),
+            to_shell_single_quoted(FORCE_SHOW_WINDOW_ARG),
+            to_shell_single_quoted(&handoff_arg)
         );
 
-        let result = Command::new("bash")
-            .arg("-c")
-            .arg(format!("pkexec bash -c '{}' &", launch_cmd))
-            .spawn();
+        let output = Command::new("pkexec")
+            .args(["/bin/sh", "-c", &launch_cmd])
+            .output();
 
-        match result {
-            Ok(_) => {
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                std::process::exit(0);
+        match output {
+            Ok(output) if output.status.success() => {
+                wait_for_elevated_instance_and_exit(handoff_file);
+                Ok("正在以管理员身份重新启动".to_string())
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let details = if !stderr.is_empty() { stderr } else { stdout };
+                Err(format!(
+                    "启动失败{}",
+                    if details.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", details)
+                    }
+                ))
             }
             Err(e) => Err(format!("启动失败: {}", e)),
         }

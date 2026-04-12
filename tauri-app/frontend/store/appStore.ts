@@ -12,6 +12,7 @@ interface AppStore {
   mihomoStatus: MihomoStatus;
   isAdmin: boolean;
   adminCheckDone: boolean;
+  adminRestartPending: boolean;
   eventListeners: UnlistenFn[];
   lastConfigChange: number;
   lastProxyChange: { groupName: string; proxyName: string; timestamp: number } | null;
@@ -20,6 +21,7 @@ interface AppStore {
   setMihomoStatus: (status: MihomoStatus) => void;
   setIsAdmin: (isAdmin: boolean) => void;
   setAdminCheckDone: (done: boolean) => void;
+  setAdminRestartPending: (pending: boolean) => void;
   
   initEventListeners: () => Promise<void>;
   cleanupEventListeners: () => void;
@@ -33,6 +35,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   isAdmin: false,
   adminCheckDone: false,
+  adminRestartPending: false,
   eventListeners: [],
   lastConfigChange: 0,
   lastProxyChange: null,
@@ -41,6 +44,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setMihomoStatus: (status) => set({ mihomoStatus: status }),
   setIsAdmin: (isAdmin) => set({ isAdmin }),
   setAdminCheckDone: (done) => set({ adminCheckDone: done }),
+  setAdminRestartPending: (pending) => set({ adminRestartPending: pending }),
   
   initEventListeners: async () => {
     get().cleanupEventListeners();
