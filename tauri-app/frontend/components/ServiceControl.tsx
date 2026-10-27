@@ -35,13 +35,13 @@ interface ServiceControlProps {
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-type ServiceStatus = 'running' | 'stopped' | 'not_installed';
+type ServiceStatus = 'running' | 'stopped' | 'not_installed' | 'unknown';
 
 const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, onStatusChange, showNotification }) => {
   void isRunning;
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>('not_installed');
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus>('unknown');
   const [serviceLoading, setServiceLoading] = useState(false);
   const [autoRestart, setAutoRestart] = useState(true);
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
@@ -59,7 +59,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
         setServiceStatus('not_installed');
       }
     } catch {
-      setServiceStatus('not_installed');
+      setServiceStatus('unknown');
     }
   }, []);
 
@@ -207,6 +207,7 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
             control={
               <Switch
                 checked={autoRestart}
+                disabled={!isTauriEnv()}
                 onChange={handleAutoRestartChange}
                 color="primary"
               />
@@ -221,13 +222,16 @@ const ServiceControl: React.FC<ServiceControlProps> = React.memo(({ isRunning, o
             }
           />
           <Typography variant="caption" color="text.secondary" sx={{ ml: 4, display: 'block' }}>
-            {t('service.autoRestartDesc')}
+            {t('service.autoRestartScope')}
           </Typography>
         </Box>
 
         <Divider sx={{ my: 2 }} />
 
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          {serviceStatus === 'unknown' && (
+            <Button variant="outlined" startIcon={<Refresh />} onClick={checkServiceStatus} disabled={!isTauriEnv()}>{t('subscription.refresh')}</Button>
+          )}
           {serviceStatus === 'not_installed' && (
             <Button
               variant="contained"

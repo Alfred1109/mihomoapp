@@ -1,5 +1,11 @@
 export default {
   app: {
+    minimize: "最小化",
+    maximize: "最大化或还原",
+    hideWindow: "隐藏到托盘",
+    navigation: "导航",
+    unknownStatus: "状态未知",
+    language: "切换语言",
     title: "Mihomo 管理器",
     dashboard: "仪表盘",
     proxy: "代理",
@@ -22,11 +28,16 @@ export default {
     memory: "内存使用"
   },
   proxy: {
+    source: "来源",
+    configSource: "配置节点",
+    ambiguousSource: "多个来源有同名节点；详情由核心的组解析顺序决定",
+    unknownStatus: "未知",
     title: "代理管理",
     refresh: "刷新",
     notRunning: "代理服务未运行",
     notRunningDesc: "启动 mihomo 服务以管理代理节点和组",
     nodeManagement: "节点管理",
+    automaticGroup: "自动选择",
     proxyGroup: "代理组",
     nodeName: "节点名称",
     type: "类型",
@@ -81,6 +92,9 @@ export default {
     switchTime: "切换时间"
   },
   subscription: {
+    statusActive: "正常",
+    statusError: "错误",
+    statusUpdating: "更新中",
     title: "订阅管理",
     refresh: "刷新",
     add: "添加订阅",
@@ -141,6 +155,12 @@ export default {
     restoreThis: "恢复此备份"
   },
   config: {
+    applyEditor: "应用更改",
+    editorPending: "请先应用 JSON 编辑内容，再保存配置。",
+    reload: "重新加载",
+    unsavedChanges: "未保存的更改",
+    reloadConfirmTitle: "放弃未保存的更改？",
+    reloadConfirmDesc: "重新加载会丢弃当前未保存的配置更改。",
     title: "配置管理",
     save: "保存",
     reset: "重置",
@@ -235,6 +255,7 @@ export default {
     justNow: "刚刚"
   },
   service: {
+    autoRestartScope: "仅适用于应用直接启动的核心；系统服务的自动恢复由系统服务管理器控制。",
     title: "Mihomo 服务管理",
     status: "服务状态",
     statusRunning: "运行中",

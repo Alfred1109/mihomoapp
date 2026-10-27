@@ -49,7 +49,7 @@ npm run tauri:build
 
 **Linux**:
 ```bash
-sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libgtk-3-dev
+sudo apt install libwebkit2gtk-4.0-dev libayatana-appindicator3-dev libgtk-3-dev
 ```
 
 ## 📂 项目结构
@@ -69,7 +69,7 @@ tauri-app/
 ```bash
 npm run dev                 # 前端开发服务器
 npm run tauri:dev          # Tauri 开发模式
-npm run tauri:build:deb    # 构建并修复 Linux DEB 依赖
+npm run tauri:build:deb    # 构建并只读检查 Linux DEB 依赖
 npm run tauri:build        # 构建应用
 npm run prepare:resources  # 准备 mihomo 二进制
 ```

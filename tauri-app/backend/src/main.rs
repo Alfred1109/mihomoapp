@@ -6,10 +6,14 @@ mod base_config;
 mod commands;
 mod config;
 mod config_manager;
+mod controller;
+mod core_binary;
 mod error;
 mod events;
 mod mihomo;
 mod platform_config;
+mod proxy_catalog;
+mod service_core;
 mod subscription;
 mod validator;
 mod watchdog;
@@ -102,13 +106,32 @@ fn main() {
                                 use std::process::Command;
                                 // 优先使用系统服务
                                 if service_commands::windows_service::is_service_installed() {
+                                    if let Err(error) =
+                                        service_commands::prepare_installed_service_start().await
+                                    {
+                                        tracing::error!("服务启动前检查失败: {}", error);
+                                        return;
+                                    }
                                     if let Ok(paths) =
                                         service_commands::windows_service::get_service_paths()
                                     {
-                                        let _ =
-                                            Command::new(&paths.winsw_exe).arg("start").output();
-                                        service_commands::wait_for_service_start().await;
-                                        watchdog.set_process(0).await;
+                                        match Command::new(&paths.winsw_exe).arg("start").output() {
+                                            Ok(output) if output.status.success() => {
+                                                watchdog.set_process(0).await;
+                                                if let Err(error) =
+                                                    service_commands::wait_for_service_start().await
+                                                {
+                                                    tracing::error!("{}", error);
+                                                }
+                                            }
+                                            Ok(output) => tracing::error!(
+                                                "启动服务失败: {}",
+                                                String::from_utf8_lossy(&output.stderr)
+                                            ),
+                                            Err(error) => {
+                                                tracing::error!("启动服务失败: {}", error)
+                                            }
+                                        }
                                         return;
                                     }
                                 }
@@ -117,14 +140,42 @@ fn main() {
                             #[cfg(not(target_os = "windows"))]
                             {
                                 use std::process::Command;
-                                // 尝试通过 systemd 启动
-                                if Command::new("systemctl")
-                                    .args(["start", "mihomo.service"])
+                                // Existing services must be checked before their configuration
+                                // is migrated; a different service must never be adopted.
+                                let installed = Command::new("systemctl")
+                                    .args(["list-unit-files", "mihomo.service"])
                                     .output()
-                                    .is_ok()
-                                {
-                                    service_commands::wait_for_service_start().await;
-                                    watchdog.set_process(0).await;
+                                    .map(|output| {
+                                        output.status.success()
+                                            && String::from_utf8_lossy(&output.stdout)
+                                                .contains("mihomo.service")
+                                    })
+                                    .unwrap_or(false);
+                                if installed {
+                                    if let Err(error) =
+                                        service_commands::prepare_installed_service_start().await
+                                    {
+                                        tracing::error!("服务启动前检查失败: {}", error);
+                                        return;
+                                    }
+                                    match Command::new("systemctl")
+                                        .args(["start", "mihomo.service"])
+                                        .output()
+                                    {
+                                        Ok(output) if output.status.success() => {
+                                            watchdog.set_process(0).await;
+                                            if let Err(error) =
+                                                service_commands::wait_for_service_start().await
+                                            {
+                                                tracing::error!("{}", error);
+                                            }
+                                        }
+                                        Ok(output) => tracing::error!(
+                                            "服务启动失败: {}",
+                                            String::from_utf8_lossy(&output.stderr)
+                                        ),
+                                        Err(error) => tracing::error!("服务启动失败: {}", error),
+                                    }
                                     return;
                                 }
                             }
@@ -142,26 +193,29 @@ fn main() {
                             .inner()
                             .clone();
                         tauri::async_runtime::spawn(async move {
-                            watchdog.clear_process().await;
-
-                            #[cfg(target_os = "windows")]
-                            {
-                                use std::process::Command;
-                                if let Ok(paths) =
-                                    service_commands::windows_service::get_service_paths()
+                            let managed_process = watchdog.take_managed_process().await;
+                            if managed_process == Some(0) {
+                                #[cfg(target_os = "windows")]
                                 {
-                                    let _ = Command::new(&paths.winsw_exe).arg("stop").output();
+                                    use std::process::Command;
+                                    if let Ok(paths) =
+                                        service_commands::windows_service::get_service_paths()
+                                    {
+                                        let _ = Command::new(&paths.winsw_exe).arg("stop").output();
+                                    }
                                 }
-                                service_commands::windows_service::kill_mihomo_process();
-                            }
 
-                            #[cfg(not(target_os = "windows"))]
-                            {
-                                use std::process::Command;
-                                let _ = Command::new("systemctl")
-                                    .args(["stop", "mihomo.service"])
-                                    .output();
-                                let _ = Command::new("pkill").arg("mihomo").output();
+                                #[cfg(not(target_os = "windows"))]
+                                {
+                                    use std::process::Command;
+                                    let _ = Command::new("systemctl")
+                                        .args(["stop", "mihomo.service"])
+                                        .output();
+                                }
+                            } else if managed_process.is_some() {
+                                if let Err(error) = mihomo::stop_mihomo().await {
+                                    tracing::error!("停止本应用进程失败: {}", error);
+                                }
                             }
                         });
                     }
@@ -232,6 +286,8 @@ fn main() {
             // Initialize application
             let window = app.get_window("main").ok_or("Failed to get main window")?;
             window.set_title("Mihomo Manager")?;
+
+            core_binary::initialize(app.path_resolver().resolve_resource("resources"));
 
             // 初始化 ConfigManager
             let config_path = config::get_config_path().map_err(|e| e.to_string())?;

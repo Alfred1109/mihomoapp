@@ -12,8 +12,9 @@ import {
   Tooltip,
   CircularProgress,
   Typography,
+  useMediaQuery,
 } from '@mui/material';
-import { Language, FiberManualRecord } from '@mui/icons-material';
+import { Language, FiberManualRecord, SpaceDashboardOutlined, SubscriptionsOutlined, HubOutlined, TuneOutlined } from '@mui/icons-material';
 import { invoke } from '@tauri-apps/api/tauri';
 import { useTranslation } from 'react-i18next';
 import TitleBar from './components/TitleBar';
@@ -36,6 +37,8 @@ const LoadingFallback: React.FC = () => (
 function App() {
   const { t, i18n } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
+  const [visitedTabs, setVisitedTabs] = useState<number[]>([0]);
+  const wideLayout = useMediaQuery((theme: import('@mui/material/styles').Theme) => theme.breakpoints.up('md'));
   const [langMenuAnchor, setLangMenuAnchor] = useState<null | HTMLElement>(null);
   const [notification, setNotification] = useState<{
     open: boolean;
@@ -61,6 +64,7 @@ function App() {
   } = useAppStore();
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
+    setVisitedTabs(previous => previous.includes(newValue) ? previous : [...previous, newValue]);
     setTabValue(newValue);
   };
 
@@ -79,13 +83,9 @@ function App() {
       const serviceStatus = await invoke<string>('get_mihomo_service_status');
       const isRunning = serviceStatus === 'running';
       
-      setMihomoStatus({
-        running: isRunning,
-        processId: null,
-        timestamp: Date.now(),
-      });
-      
-      if (!isRunning) {
+      if (isRunning) {
+        setMihomoStatus({ running: true, processId: null, timestamp: Date.now() });
+      } else {
         try {
           const directStatus = await invoke<boolean>('get_mihomo_status');
           setMihomoStatus({
@@ -94,10 +94,12 @@ function App() {
             timestamp: Date.now(),
           });
         } catch (error) {
+          setMihomoStatus({ running: false, processId: null, timestamp: 0 });
           console.warn('Failed to check mihomo direct status:', error);
         }
       }
     } catch (error) {
+      setMihomoStatus({ running: false, processId: null, timestamp: 0 });
       console.warn('Failed to check mihomo service status:', error);
     }
   }, [setMihomoStatus]);
@@ -148,7 +150,7 @@ function App() {
   };
 
   useEffect(() => {
-    initEventListeners();
+    if (isTauriEnv()) void initEventListeners();
     checkMihomoStatus();
     checkAdminPrivileges();
 
@@ -162,18 +164,21 @@ function App() {
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
         <TitleBar>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 1 }}>
-            <Tooltip title={mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}>
+            <Tooltip title={!mihomoStatus.timestamp ? t('app.unknownStatus') : mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1 }}>
                 <FiberManualRecord 
                   sx={{ 
                     fontSize: 10, 
-                    color: mihomoStatus.running ? 'success.main' : 'error.main',
+                    color: !mihomoStatus.timestamp ? 'text.disabled' : mihomoStatus.running ? 'success.main' : 'error.main',
                   }} 
                 />
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'inline' }, whiteSpace: 'nowrap' }}>
+                  {!mihomoStatus.timestamp ? t('app.unknownStatus') : mihomoStatus.running ? t('dashboard.running') : t('dashboard.stopped')}
+                </Typography>
               </Box>
             </Tooltip>
 
-            {adminCheckDone && !isAdmin && (
+            {isTauriEnv() && adminCheckDone && !isAdmin && (
               <Button
                 size="small"
                 color="warning"
@@ -192,6 +197,7 @@ function App() {
 
             <IconButton
               size="small"
+              aria-label={t('app.language')}
               onClick={handleLanguageMenuOpen}
               sx={{ color: 'text.secondary' }}
             >
@@ -215,22 +221,28 @@ function App() {
         </TitleBar>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: 'background.paper' }}>
-            <Tabs 
-              value={tabValue} 
-              onChange={handleTabChange} 
-              aria-label="mihomo manager tabs"
-              sx={{ px: 2, minHeight: 42 }}
+          <Box sx={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: { xs: 'column', md: 'row' } }}>
+          <Box component="nav" aria-label={t('app.navigation')} sx={{ width: { md: 210 }, flexShrink: 0, borderRight: { md: 1 }, borderBottom: { xs: 1, md: 0 }, borderColor: 'divider', backgroundColor: 'background.paper', px: { xs: 1, md: 1.5 }, pt: { md: 2.5 } }}>
+            <Typography variant="overline" sx={{ display: { xs: 'none', md: 'block' }, px: 1.5, mb: 1, color: 'text.secondary', letterSpacing: '0.12em', fontSize: '0.67rem', fontWeight: 700 }}>{t('app.navigation')}</Typography>
+            <Tabs
+              value={tabValue}
+              onChange={handleTabChange}
+              orientation={wideLayout ? 'vertical' : 'horizontal'}
+              variant="scrollable"
+              allowScrollButtonsMobile
+              aria-label={t('app.navigation')}
+              sx={{ '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTabs-flexContainer': { gap: 0.5 }, '& .MuiTab-root': { alignItems: 'center', justifyContent: { md: 'flex-start' }, minHeight: 44, px: 1.5, borderRadius: 2, color: 'text.secondary', '&.Mui-selected': { color: 'primary.light', backgroundColor: 'rgba(96, 165, 250, 0.12)' } } }}
             >
-              <Tab label={t('app.dashboard')} />
-              <Tab label={t('app.subscription')} />
-              <Tab label={t('app.proxy')} />
-              <Tab label={t('app.config')} />
+              <Tab id="tab-0" aria-controls="tabpanel-0" icon={<SpaceDashboardOutlined />} iconPosition="start" label={t('app.dashboard')} />
+              <Tab id="tab-1" aria-controls="tabpanel-1" icon={<SubscriptionsOutlined />} iconPosition="start" label={t('app.subscription')} />
+              <Tab id="tab-2" aria-controls="tabpanel-2" icon={<HubOutlined />} iconPosition="start" label={t('app.proxy')} />
+              <Tab id="tab-3" aria-controls="tabpanel-3" icon={<TuneOutlined />} iconPosition="start" label={t('app.config')} />
             </Tabs>
           </Box>
 
-          <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-            <TabPanel value={tabValue} index={0}>
+          <Box component="main" sx={{ flex: 1, minWidth: 0, overflow: 'auto', px: { xs: 2, md: 3.5 }, py: { xs: 2, md: 3 } }}>
+            <Box sx={{ maxWidth: 1440, mx: 'auto' }}>
+            <TabPanel value={tabValue} index={0} mounted={visitedTabs.includes(0)}>
               <ErrorBoundary>
                 <Suspense fallback={<LoadingFallback />}>
                   <Dashboard 
@@ -242,7 +254,7 @@ function App() {
               </ErrorBoundary>
             </TabPanel>
 
-            <TabPanel value={tabValue} index={1}>
+            <TabPanel value={tabValue} index={1} mounted={visitedTabs.includes(1)}>
               <ErrorBoundary>
                 <Suspense fallback={<LoadingFallback />}>
                   <SubscriptionManager showNotification={showNotification} />
@@ -250,18 +262,19 @@ function App() {
               </ErrorBoundary>
             </TabPanel>
 
-            <TabPanel value={tabValue} index={2}>
+            <TabPanel value={tabValue} index={2} mounted={visitedTabs.includes(2)}>
               <ErrorBoundary>
                 <Suspense fallback={<LoadingFallback />}>
                   <ProxyManager 
                     isRunning={mihomoStatus.running}
+                    active={tabValue === 2}
                     showNotification={showNotification}
                   />
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>
 
-            <TabPanel value={tabValue} index={3}>
+            <TabPanel value={tabValue} index={3} mounted={visitedTabs.includes(3)}>
               <ErrorBoundary>
                 <Suspense fallback={<LoadingFallback />}>
                   <ConfigManager 
@@ -271,6 +284,8 @@ function App() {
                 </Suspense>
               </ErrorBoundary>
             </TabPanel>
+            </Box>
+          </Box>
           </Box>
         </Box>
 

@@ -17,7 +17,7 @@
 
 - **前端**: React + TypeScript + Material-UI (MUI)
 - **后端**: Rust + Tauri
-- **代理核心**: Mihomo Meta v1.19.19 (with gVisor)
+- **代理核心**: Mihomo Meta v1.19.33 (with gVisor)
 - **构建工具**: Vite + Cargo
 
 ## 🚀 快速开始
@@ -72,7 +72,7 @@ mihomo-manager/
 
 ## 平台支持
 
-- ✅ **Linux** (Ubuntu 24.04+, Debian 12+)
+- **Linux**：当前 Tauri 1.x 依赖 WebKitGTK 4.0；在具备对应运行库的发行版上验收（如 Debian 12）。Ubuntu 24.04 的原生 WebKitGTK 4.1 兼容性尚未验收。
 - ✅ **Windows** (Windows 10+)
 - ⏳ **macOS** (计划支持)
 

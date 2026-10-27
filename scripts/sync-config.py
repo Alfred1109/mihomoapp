@@ -20,6 +20,51 @@ from typing import Dict, List, Any, Optional
 import platform
 from datetime import datetime
 
+DEFAULT_FINGERPRINT_KEY = 'mihomo-manager-default-client-fingerprint'
+
+
+def migrate_client_fingerprint(config: Dict[str, Any], default: str = 'chrome') -> bool:
+    """Materialize the legacy fallback while retaining explicit node settings."""
+    import copy
+    candidate = copy.deepcopy(config)
+    legacy = candidate.get('global-client-fingerprint', candidate.get(DEFAULT_FINGERPRINT_KEY, default))
+    if legacy is None:
+        legacy = ''
+    if not isinstance(legacy, str):
+        raise ValueError('客户端指纹默认值必须为字符串')
+    current = candidate.get(DEFAULT_FINGERPRINT_KEY, legacy)
+    if current != legacy:
+        raise ValueError('旧全局指纹与应用默认指纹冲突')
+    candidate.pop('global-client-fingerprint', None)
+    candidate[DEFAULT_FINGERPRINT_KEY] = legacy
+    if legacy:
+        for proxy in candidate.get('proxies', []):
+            kind = proxy.get('type')
+            supported = kind in ('vmess', 'vless', 'trojan', 'anytls', 'gost-relay', 'trusttunnel') or (kind == 'ss' and proxy.get('plugin') == 'shadow-tls')
+            if supported and proxy.get('client-fingerprint') in (None, ''):
+                proxy['client-fingerprint'] = legacy
+            if kind == 'vless':
+                download = proxy.get('xhttp-opts', {}).get('download-settings')
+                if isinstance(download, dict) and download.get('client-fingerprint') == '':
+                    download['client-fingerprint'] = legacy
+        encoded = json.dumps(legacy, ensure_ascii=False)
+        applicable = '(.type == "vmess" or .type == "vless" or .type == "trojan" or .type == "anytls" or .type == "gost-relay" or .type == "trusttunnel" or (.type == "ss" and .plugin == "shadow-tls"))'
+        expressions = [
+            f'(select({applicable} and (."client-fingerprint" == null or ."client-fingerprint" == "")) | ."client-fingerprint") = {encoded}',
+            f'(select(.type == "vless" and ."xhttp-opts"."download-settings"."client-fingerprint" == "") | ."xhttp-opts"."download-settings"."client-fingerprint") = {encoded}',
+        ]
+        for provider in candidate.get('proxy-providers', {}).values():
+            overrides = provider.setdefault('override', {})
+            previous = overrides.setdefault('override-expr', [])
+            if not isinstance(previous, list) or not all(isinstance(item, str) for item in previous):
+                raise ValueError('代理集 override-expr 必须为字符串数组')
+            previous.extend(expression for expression in expressions if expression not in previous)
+    changed = candidate != config
+    config.clear()
+    config.update(candidate)
+    return changed
+
+
 class ConfigSyncer:
     def __init__(self):
         self.platform = platform.system().lower()
@@ -242,7 +287,6 @@ class ConfigSyncer:
             'unified-delay': True,
             'tcp-concurrent': True,
             'find-process-mode': 'strict',
-            'global-client-fingerprint': 'chrome',
             'keep-alive-interval': 30
         }
         
@@ -251,6 +295,8 @@ class ConfigSyncer:
                 config[key] = expected_value
                 changes.append(f'⚡ 设置{key}优化')
         
+        if migrate_client_fingerprint(config):
+            changes.append('✅ 将已移除的全局指纹迁移到各代理节点，保留显式设置')
         return changes
     
     def _standardize_rules(self, config: Dict[str, Any]) -> List[str]:

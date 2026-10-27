@@ -65,6 +65,7 @@ export interface ProxyGroup {
 }
 
 export interface ProxyNode {
+  'provider-name'?: string;
   name: string;
   type: string;
   server?: string;
@@ -80,8 +81,15 @@ export interface ProxyHistory {
   name?: string;
 }
 
+export interface ProxyProvider {
+  name?: string;
+  vehicleType: string;
+  proxies: ProxyNode[];
+}
+
 export interface ProxiesResponse {
   proxies: Record<string, ProxyNode | ProxyGroup>;
+  providers?: Record<string, ProxyProvider>;
 }
 
 export interface IPInfo {

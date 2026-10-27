@@ -43,10 +43,10 @@
 **Linux**:
 ```bash
 # Ubuntu/Debian
-sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libgtk-3-dev
+sudo apt install libwebkit2gtk-4.0-dev libayatana-appindicator3-dev libgtk-3-dev
 
 # Fedora
-sudo dnf install webkit2gtk4.1-devel libappindicator-gtk3-devel gtk3-devel
+sudo dnf install webkit2gtk4.0-devel libappindicator-gtk3-devel gtk3-devel
 ```
 
 ### 安装步骤
@@ -124,7 +124,7 @@ npm run tauri:dev        # 启动完整应用（热重载）
 
 # 构建
 npm run build            # 构建前端
-npm run tauri:build:deb  # 构建并修复 Linux DEB 依赖
+npm run tauri:build:deb  # 构建并只读检查 Linux DEB 依赖
 npm run tauri:build      # 构建完整应用
 
 # 质量检查
@@ -243,7 +243,7 @@ npm run tauri:build:deb
 npm run tauri:build
 ```
 
-`tauri:build:deb` 会在 Tauri 1.x 构建完成后修正 Debian 控制文件中的 `Depends` 字段，避免 Ubuntu 24.04 上被额外写入 `libwebkit2gtk-4.0-37` 硬依赖而安装失败。
+`tauri:build:deb` 保留 Tauri 构建器生成的 `Depends`，随后只读解包并核对 ELF `NEEDED` 与 `dpkg-shlibdeps` 计算的最低运行依赖。检查不改写安装包，缺少依赖映射或元数据不足时返回失败。当前 Tauri 1.x 使用 WebKitGTK 4.0，WebKitGTK 4.1 不能代替其 ABI；未声称 Ubuntu 24.04 原生支持。详见 [Debian 包检查](../../docs/DEBIAN_PACKAGING.md)。
 
 **输出位置**:
 - **Windows**: `backend/target/release/bundle/msi/` 或 `nsis/`

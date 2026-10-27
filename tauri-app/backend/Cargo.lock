@@ -1913,6 +1913,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "libc",
+ "quick-xml",
  "reqwest",
  "serde",
  "serde_json",

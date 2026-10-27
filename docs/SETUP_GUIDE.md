@@ -206,36 +206,18 @@ tauri-app/src-tauri/target/release/bundle/
 
 ## 🐛 常见问题解决
 
-### Ubuntu 24.04 依赖兼容性问题
+### Linux WebKitGTK 依赖边界
 
-**问题描述**：
-Ubuntu 24.04使用了新的软件包版本，可能导致某些依赖不兼容。
+当前 Tauri 1.x 锁定 WebKitGTK 4.0 / JavaScriptCoreGTK 4.0 / libsoup2。WebKitGTK 4.1 不提供同一 ABI，不能通过修改 DEB 的 Depends 或创建软链接实现替代。请在具备 4.0 开发库和运行库的发行版构建及验收（例如 Debian 12）。Ubuntu 24.04 的原生 4.1 支持需要独立框架迁移，当前没有完成该验收。
 
-**解决方案**：
+构建后使用只读检查，不重写构建器依赖：
+
 ```bash
-# 更新软件源
-sudo apt update
-
-# 安装兼容性库
-sudo apt install -y \
-    libwebkit2gtk-4.0-dev \
-    libgtk-3-dev \
-    libayatana-appindicator3-dev \
-    librsvg2-dev
-
-# 如果仍有问题，尝试从源码安装webkit2gtk
-sudo apt build-dep webkit2gtk-4.0
+cd tauri-app
+npm run tauri:build:deb
 ```
 
-**替代方案**：
-```bash
-# 使用Flatpak版本
-flatpak install flathub com.github.alfred1109.mihomoapp
-
-# 使用AppImage版本（推荐）
-wget https://github.com/Alfred1109/mihomoapp/releases/latest/download/mihomo-manager-linux-x64.AppImage
-chmod +x mihomo-manager-linux-x64.AppImage
-```
+详细要求及验收边界见 [Debian 包检查](DEBIAN_PACKAGING.md)。
 
 ### Windows构建问题
 

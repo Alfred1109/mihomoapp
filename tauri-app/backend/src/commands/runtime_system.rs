@@ -65,7 +65,10 @@ fn to_shell_single_quoted(value: &str) -> String {
 
 #[tauri::command]
 pub async fn get_mihomo_status() -> Result<bool, String> {
-    Ok(mihomo::is_mihomo_running().await)
+    crate::controller::health()
+        .await
+        .map(|()| true)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -261,37 +264,19 @@ pub async fn rename_config_backup(
 
 #[tauri::command]
 pub async fn check_mihomo_binary() -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    let mihomo_paths = vec![
-        "mihomo.exe",
-        "clash-meta.exe",
-        "./mihomo.exe",
-        "./clash-meta.exe",
-    ];
-
-    #[cfg(not(target_os = "windows"))]
-    let mihomo_paths = vec![
-        "mihomo",
-        "clash-meta",
-        "./mihomo",
-        "./clash-meta",
-        "/usr/bin/mihomo",
-        "/usr/local/bin/mihomo",
-    ];
-
-    for path in mihomo_paths {
-        if let Ok(output) = std::process::Command::new(path).arg("--version").output() {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout);
-                return Ok(format!("找到 mihomo: {} - {}", path, version.trim()));
-            }
-        }
+    let path = crate::core_binary::resolve_mihomo().map_err(|error| error.to_string())?;
+    let output = std::process::Command::new(&path)
+        .arg("-v")
+        .output()
+        .map_err(|error| format!("无法执行选定核心 {}: {}", path.display(), error))?;
+    if !output.status.success() {
+        return Err(format!("选定核心版本检查失败: {}", path.display()));
     }
-
-    Err(
-        "未找到 mihomo 二进制文件。请从 https://github.com/MetaCubeX/mihomo/releases 下载并安装。"
-            .to_string(),
-    )
+    Ok(format!(
+        "找到 mihomo: {} - {}",
+        path.display(),
+        String::from_utf8_lossy(&output.stdout).trim()
+    ))
 }
 
 #[tauri::command]
@@ -451,42 +436,9 @@ pub async fn restart_as_admin() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn get_bundled_mihomo_path() -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    let mihomo_binary = "mihomo.exe";
-    #[cfg(not(target_os = "windows"))]
-    let mihomo_binary = "mihomo";
-
-    #[cfg(target_os = "windows")]
-    let system_paths: Vec<&str> = vec![];
-    #[cfg(not(target_os = "windows"))]
-    let system_paths = vec![
-        "/usr/local/bin/mihomo",
-        "/usr/bin/mihomo",
-        "/opt/mihomo/mihomo",
-    ];
-
-    for path in &system_paths {
-        if std::path::Path::new(path).exists() {
-            return Ok(path.to_string());
-        }
-    }
-
-    let app_dir = std::env::current_exe()
-        .map_err(|e| format!("获取应用目录失败: {}", e))?
-        .parent()
-        .ok_or("无法获取应用目录")?
-        .to_path_buf();
-
-    let mihomo_path = app_dir.join(mihomo_binary);
-
-    if mihomo_path.exists() {
-        Ok(mihomo_path.to_string_lossy().to_string())
-    } else {
-        Err(format!(
-            "未找到 {} 文件。请确保 mihomo 已安装在系统路径或应用目录中",
-            mihomo_binary
-        ))
-    }
+    crate::core_binary::resolve_mihomo()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

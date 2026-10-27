@@ -20,43 +20,13 @@ pub(crate) mod windows_service {
             .ok_or("无法获取应用目录")?
             .to_path_buf();
 
-        let winsw_source = {
-            let direct = app_dir.join("winsw.exe");
-            if direct.exists() {
-                direct
-            } else {
-                let resource = app_dir.join("resources").join("winsw.exe");
-                if resource.exists() {
-                    resource
-                } else {
-                    return Err(format!(
-                        "未找到 winsw.exe 文件。期望位置: {}",
-                        direct.display()
-                    ));
-                }
-            }
-        };
+        let winsw_source = crate::core_binary::resolve_bundled_resource("winsw.exe")
+            .map_err(|error| error.to_string())?;
+        let mihomo_path =
+            crate::core_binary::resolve_mihomo().map_err(|error| error.to_string())?;
 
-        let mihomo_path = {
-            let mihomo = app_dir.join("mihomo.exe");
-            if mihomo.exists() {
-                mihomo
-            } else {
-                let resource = app_dir.join("resources").join("mihomo.exe");
-                if resource.exists() {
-                    std::fs::copy(&resource, &mihomo)
-                        .map_err(|e| format!("复制 mihomo.exe 失败: {}", e))?;
-                    mihomo
-                } else {
-                    return Err(format!(
-                        "未找到 mihomo.exe 文件。期望位置: {}",
-                        mihomo.display()
-                    ));
-                }
-            }
-        };
-
-        let config_dir = dirs::config_dir().ok_or("无法获取配置目录")?.join("mihomo");
+        let config_path = crate::config::get_config_path().map_err(|error| error.to_string())?;
+        let config_dir = config_path.parent().ok_or("无法获取配置目录")?;
 
         let winsw_exe = app_dir.join("MihomoService.exe");
         let winsw_xml = app_dir.join("MihomoService.xml");
@@ -78,15 +48,24 @@ pub(crate) mod windows_service {
   <startmode>Automatic</startmode>
   <onfailure action="restart" delay="5 sec"/>
 </service>"#,
-            mihomo_path.display(),
-            config_dir.display(),
-            app_dir.display()
+            xml_escape(&mihomo_path.to_string_lossy()),
+            xml_escape(&config_dir.to_string_lossy()),
+            xml_escape(&app_dir.to_string_lossy())
         );
 
         std::fs::write(&winsw_xml, xml_content)
             .map_err(|e| format!("写入 WinSW 配置失败: {}", e))?;
 
         Ok(ServicePaths { winsw_exe })
+    }
+
+    fn xml_escape(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\"', "&quot;")
+            .replace('\'', "&apos;")
     }
 
     pub fn is_service_installed() -> bool {
@@ -96,39 +75,69 @@ pub(crate) mod windows_service {
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
-
-    pub fn kill_mihomo_process() {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "mihomo.exe"])
-            .output();
-    }
 }
 
-pub(crate) async fn wait_for_service_start() -> bool {
+pub(crate) async fn wait_for_service_start() -> Result<(), String> {
+    let mut last_error = String::new();
     for _ in 0..10 {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        if crate::mihomo::is_mihomo_running().await {
-            return true;
+        match crate::controller::connect_configured().await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error.to_string(),
         }
     }
-    false
+    Err(format!(
+        "服务命令已执行，但无法确认配置指定的核心 API：{}。尚未确认此服务实际加载的配置。",
+        last_error
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn quote_systemd_argument(path: &std::path::Path) -> Result<String, String> {
+    let value = path.to_str().ok_or("服务路径必须为有效 UTF-8")?;
+    if value.chars().any(|character| character.is_control()) {
+        return Err("服务路径不能包含控制字符".to_string());
+    }
+    Ok(format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('\"', "\\\"")
+            .replace('%', "%%")
+            .replace('$', "$$")
+    ))
+}
+
+/// Verify the existing service's exact core and config before changing a
+/// configuration that will be consumed by that service.
+pub(crate) async fn prepare_installed_service_start() -> Result<(), String> {
+    let core = crate::core_binary::resolve_mihomo().map_err(|error| error.to_string())?;
+    let config = crate::config::get_config_path().map_err(|error| error.to_string())?;
+    crate::service_core::verify_installed_service_core(&core, &config)
+        .map_err(|error| format!("{:#}", error))?;
+    crate::config::prepare_config_for_core(&core)
+        .await
+        .map_err(|error| format!("配置兼容准备失败: {:#}", error))
 }
 
 #[tauri::command]
 pub async fn install_mihomo_service(
     watchdog: State<'_, Arc<watchdog::ProcessWatchdog>>,
 ) -> Result<String, String> {
-    watchdog.clear_process().await;
-
-    let config_dir = dirs::config_dir().ok_or("无法获取配置目录")?.join("mihomo");
-    std::fs::create_dir_all(&config_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
-
-    let config_path = config_dir.join("config.yaml");
+    let config_path = crate::config::get_config_path().map_err(|error| error.to_string())?;
+    let config_dir = config_path.parent().ok_or("无法获取配置目录")?;
+    std::fs::create_dir_all(config_dir).map_err(|e| format!("创建配置目录失败: {}", e))?;
     if !config_path.exists() {
         crate::config::save_config(crate::mihomo::create_default_config())
             .await
             .map_err(|e| format!("创建默认配置失败: {}", e))?;
     }
+
+    let core = crate::core_binary::resolve_mihomo().map_err(|error| error.to_string())?;
+    crate::config::prepare_config_for_core(&core)
+        .await
+        .map_err(|error| format!("配置兼容准备失败: {:#}", error))?;
+    watchdog.clear_process().await;
 
     #[cfg(target_os = "windows")]
     {
@@ -140,11 +149,8 @@ pub async fn install_mihomo_service(
                 .args(["stop", "--force"])
                 .output();
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            windows_service::kill_mihomo_process();
             let _ = Command::new(&paths.winsw_exe).arg("uninstall").output();
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        } else {
-            windows_service::kill_mihomo_process();
         }
 
         let output = Command::new(&paths.winsw_exe)
@@ -167,22 +173,10 @@ pub async fn install_mihomo_service(
     #[cfg(not(target_os = "windows"))]
     {
         use std::fs;
-        use std::path::Path;
         use std::process::Command;
 
-        let mihomo_binary = ["/usr/local/bin/mihomo", "/usr/bin/mihomo"]
-            .iter()
-            .find(|p| Path::new(p).exists())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                Command::new("which")
-                    .arg("mihomo")
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            })
-            .ok_or("未找到 mihomo 二进制文件，请先安装 mihomo")?;
+        let mihomo_binary =
+            crate::core_binary::resolve_mihomo().map_err(|error| error.to_string())?;
 
         let service_content = format!(
             r#"[Unit]
@@ -200,8 +194,8 @@ Group=root
 [Install]
 WantedBy=multi-user.target
 "#,
-            mihomo_binary,
-            config_path.parent().ok_or("无法获取配置目录")?.display()
+            quote_systemd_argument(&mihomo_binary)?,
+            quote_systemd_argument(config_path.parent().ok_or("无法获取配置目录")?)?
         );
 
         fs::write("/etc/systemd/system/mihomo.service", service_content)
@@ -229,8 +223,8 @@ WantedBy=multi-user.target
             }
         }
 
-        wait_for_service_start().await;
         watchdog.set_process(0).await;
+        wait_for_service_start().await?;
 
         Ok("Mihomo 服务安装、启用并启动成功".to_string())
     }
@@ -240,6 +234,7 @@ WantedBy=multi-user.target
 pub async fn start_mihomo_service_cmd(
     watchdog: State<'_, Arc<watchdog::ProcessWatchdog>>,
 ) -> Result<String, String> {
+    prepare_installed_service_start().await?;
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
@@ -255,14 +250,9 @@ pub async fn start_mihomo_service_cmd(
             .map_err(|e| format!("启动服务命令执行失败: {}", e))?;
 
         if output.status.success() {
-            let started = wait_for_service_start().await;
             watchdog.set_process(0).await;
-
-            if started {
-                Ok("mihomo 服务启动成功".to_string())
-            } else {
-                Ok("mihomo 服务启动命令已执行，等待服务完全启动...".to_string())
-            }
+            wait_for_service_start().await?;
+            Ok("mihomo 服务启动成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -292,14 +282,9 @@ pub async fn start_mihomo_service_cmd(
             .map_err(|e| format!("启动服务失败: {}", e))?;
 
         if output.status.success() {
-            let started = wait_for_service_start().await;
             watchdog.set_process(0).await;
-
-            if started {
-                Ok("Mihomo 服务启动成功".to_string())
-            } else {
-                Ok("Mihomo 服务启动命令已执行，等待服务完全启动...".to_string())
-            }
+            wait_for_service_start().await?;
+            Ok("Mihomo 服务启动成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(format!("服务启动失败: {}", stderr))
@@ -324,12 +309,15 @@ pub async fn stop_mihomo_service_cmd(
             .map_err(|e| format!("停止服务失败: {}", e))?;
 
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        windows_service::kill_mihomo_process();
 
         if output.status.success() {
+            crate::controller::clear_connection().await;
             Ok("mihomo 服务停止成功".to_string())
         } else {
-            Ok("mihomo 服务已停止".to_string())
+            Err(format!(
+                "停止服务失败: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 
@@ -343,12 +331,15 @@ pub async fn stop_mihomo_service_cmd(
             .map_err(|e| format!("停止服务失败: {}", e))?;
 
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        let _ = Command::new("pkill").arg("mihomo").output();
 
         if output.status.success() {
+            crate::controller::clear_connection().await;
             Ok("Mihomo 服务停止成功".to_string())
         } else {
-            Ok("Mihomo 服务已停止".to_string())
+            Err(format!(
+                "停止服务失败: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
         }
     }
 }
@@ -357,6 +348,7 @@ pub async fn stop_mihomo_service_cmd(
 pub async fn restart_mihomo_service_cmd(
     watchdog: State<'_, Arc<watchdog::ProcessWatchdog>>,
 ) -> Result<String, String> {
+    prepare_installed_service_start().await?;
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
@@ -368,8 +360,8 @@ pub async fn restart_mihomo_service_cmd(
             .map_err(|e| format!("重启服务失败: {}", e))?;
 
         if output.status.success() {
-            wait_for_service_start().await;
             watchdog.set_process(0).await;
+            wait_for_service_start().await?;
             Ok("mihomo 服务重启成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -391,8 +383,8 @@ pub async fn restart_mihomo_service_cmd(
             .map_err(|e| format!("重启服务失败: {}", e))?;
 
         if output.status.success() {
-            wait_for_service_start().await;
             watchdog.set_process(0).await;
+            wait_for_service_start().await?;
             Ok("Mihomo 服务重启成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -414,7 +406,6 @@ pub async fn uninstall_mihomo_service(
 
         let _ = Command::new(&paths.winsw_exe).arg("stop").output();
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        windows_service::kill_mihomo_process();
 
         let output = Command::new(&paths.winsw_exe)
             .arg("uninstall")
@@ -444,7 +435,6 @@ pub async fn uninstall_mihomo_service(
         let _ = Command::new("systemctl")
             .args(["disable", "mihomo.service"])
             .output();
-        let _ = Command::new("pkill").arg("mihomo").output();
 
         match fs::remove_file("/etc/systemd/system/mihomo.service") {
             Ok(_) => {
@@ -683,5 +673,20 @@ pub async fn get_mihomo_service_status() -> Result<String, String> {
             "inactive" | "deactivating" | "failed" => Ok("stopped".to_string()),
             _ => Ok("installed".to_string()),
         }
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod service_path_tests {
+    use super::quote_systemd_argument;
+
+    #[test]
+    fn service_paths_are_quoted_and_do_not_expand_specifiers() {
+        assert_eq!(
+            quote_systemd_argument(std::path::Path::new("/path with spaces/$core%/mihomo"))
+                .unwrap(),
+            "\"/path with spaces/$$core%%/mihomo\""
+        );
+        assert!(quote_systemd_argument(std::path::Path::new("/bad\npath")).is_err());
     }
 }

@@ -1,5 +1,11 @@
 export default {
   app: {
+    minimize: "Minimize",
+    maximize: "Maximize or restore",
+    hideWindow: "Hide to tray",
+    navigation: "Navigation",
+    unknownStatus: "Status unknown",
+    language: "Change language",
     title: "Mihomo Manager",
     dashboard: "Dashboard",
     proxy: "Proxy",
@@ -22,11 +28,16 @@ export default {
     memory: "Memory Usage"
   },
   proxy: {
+    source: "Source",
+    configSource: "Config",
+    ambiguousSource: "Same name in multiple sources; runtime group ordering determines the actual node",
+    unknownStatus: "Unknown",
     title: "Proxy Manager",
     refresh: "Refresh",
     notRunning: "Proxy Service Not Running",
     notRunningDesc: "Start the mihomo service to manage proxy nodes and groups",
     nodeManagement: "Node Management",
+    automaticGroup: "Automatic",
     proxyGroup: "Proxy Group",
     nodeName: "Node Name",
     type: "Type",
@@ -81,6 +92,9 @@ export default {
     switchTime: "Switch Time"
   },
   subscription: {
+    statusActive: "Active",
+    statusError: "Error",
+    statusUpdating: "Updating",
     title: "Subscription Manager",
     refresh: "Refresh",
     add: "Add Subscription",
@@ -141,6 +155,12 @@ export default {
     restoreThis: "Restore"
   },
   config: {
+    applyEditor: "Apply changes",
+    editorPending: "Apply the JSON edits before saving the configuration.",
+    reload: "Reload",
+    unsavedChanges: "Unsaved changes",
+    reloadConfirmTitle: "Discard unsaved changes?",
+    reloadConfirmDesc: "Reloading will discard your unsaved configuration changes.",
     title: "Configuration Manager",
     save: "Save",
     reset: "Reset",
@@ -235,6 +255,7 @@ export default {
     justNow: "just now"
   },
   service: {
+    autoRestartScope: "Applies to cores started directly by the app. System service recovery is controlled by the service manager.",
     title: "Mihomo Service Management",
     status: "Service Status",
     statusRunning: "Running",

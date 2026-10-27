@@ -22,9 +22,9 @@ const theme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
-      main: '#60a5fa',
-      light: '#93c5fd',
-      dark: '#3b82f6',
+      main: '#63a9f7',
+      light: '#a3d0ff',
+      dark: '#4387d1',
     },
     secondary: {
       main: '#a78bfa',
@@ -39,12 +39,12 @@ const theme = createTheme({
       main: '#f87171',
     },
     background: {
-      default: '#1e1e2e',
-      paper: '#282838',
+      default: '#10151f',
+      paper: '#192230',
     },
     text: {
-      primary: '#e4e4e7',
-      secondary: '#a1a1aa',
+      primary: '#edf2f8',
+      secondary: '#9aabc0',
     },
     divider: 'rgba(255, 255, 255, 0.08)',
   },
@@ -66,7 +66,7 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 8,
+    borderRadius: 12,
   },
   components: {
     MuiCssBaseline: {
@@ -76,7 +76,6 @@ const theme = createTheme({
         },
         body: {
           scrollbarWidth: "thin",
-          userSelect: 'none',
           "&::-webkit-scrollbar, & *::-webkit-scrollbar": {
             backgroundColor: "transparent",
             width: "6px",
@@ -97,8 +96,10 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           textTransform: 'none',
-          fontWeight: 500,
-          borderRadius: 6,
+          fontWeight: 600,
+          borderRadius: 9,
+          boxShadow: 'none',
+          '&:focus-visible': { outline: '2px solid #a3d0ff', outlineOffset: 2 },
         },
         sizeSmall: {
           fontSize: '0.8125rem',
@@ -109,8 +110,9 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          borderRadius: 10,
-          border: '1px solid rgba(255, 255, 255, 0.06)',
+          borderRadius: 14,
+          border: '1px solid rgba(187, 211, 240, 0.09)',
+          boxShadow: '0 8px 26px rgba(0, 0, 0, 0.10)',
         },
       },
     },
@@ -138,6 +140,9 @@ const theme = createTheme({
           fontSize: '0.75rem',
         },
       },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: { root: { backgroundColor: 'rgba(5, 12, 22, 0.18)' } },
     },
     MuiTab: {
       styleOverrides: {

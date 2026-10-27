@@ -14,8 +14,11 @@ import {
   Paper,
   Chip,
   LinearProgress,
-  Alert,
   TableSortLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Refresh,
@@ -29,21 +32,23 @@ import {
 import { invoke } from '@tauri-apps/api/tauri';
 import { useTranslation } from 'react-i18next';
 import { proxyCache, defer } from '../utils/performance';
+import { proxyCandidates, uniqueProxy } from '../utils/proxyCatalog';
 import { useAppStore } from '../store/appStore';
 import type { ProxyNode, ProxyGroup, ProxiesResponse } from '../types';
 
 interface ProxyManagerProps {
   isRunning: boolean;
+  active: boolean;
   showNotification: (message: string, severity?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
 type SortField = 'name' | 'type' | 'delay' | 'status';
 type SortOrder = 'asc' | 'desc';
 
-const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showNotification }) => {
+const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, active, showNotification }) => {
   const { t } = useTranslation();
   const lastProxyChange = useAppStore((state) => state.lastProxyChange);
-  const [proxies, setProxies] = useState<{ [key: string]: ProxyNode | ProxyGroup }>({});
+  const [catalog, setCatalog] = useState<ProxiesResponse>({ proxies: {} });
   const [groups, setGroups] = useState<ProxyGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -79,7 +84,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     // 优先选中PROXY组，如果不存在则选第一个可用组
     if (proxyGroups.length > 0) {
       const hasProxy = proxyGroups.some(g => g.name === 'PROXY');
-      setSelectedGroup(hasProxy ? 'PROXY' : proxyGroups[0].name);
+      setSelectedGroup(current => proxyGroups.some(group => group.name === current) ? current : (hasProxy ? 'PROXY' : proxyGroups[0].name));
     }
   }, []);
 
@@ -88,13 +93,13 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     
     const cached = proxyCache.get('proxies');
     if (cached) {
-      setProxies(cached.proxies || {});
+      setCatalog(cached);
       extractProxyGroups(cached);
       defer(async () => {
         try {
           const response = await invoke<ProxiesResponse>('get_proxies');
           proxyCache.set('proxies', response);
-          setProxies(response.proxies || {});
+          setCatalog(response);
           extractProxyGroups(response);
         } catch (error) {
           console.warn('Failed to refresh proxy cache in background:', error);
@@ -107,7 +112,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
     try {
       const response = await invoke<ProxiesResponse>('get_proxies');
       proxyCache.set('proxies', response);
-      setProxies(response.proxies || {});
+      setCatalog(response);
       extractProxyGroups(response);
     } catch (error) {
       showNotification(`${t('proxy.loadFailed')}: ${error}`, 'error');
@@ -185,8 +190,8 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
 
   const sortNodes = (nodeNames: string[]) => {
     return [...nodeNames].sort((a, b) => {
-      const nodeA = proxies[a] as ProxyNode;
-      const nodeB = proxies[b] as ProxyNode;
+      const nodeA = uniqueProxy(catalog, a) as ProxyNode | undefined;
+      const nodeB = uniqueProxy(catalog, b) as ProxyNode | undefined;
       
       let compareResult = 0;
       
@@ -220,6 +225,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
   };
 
   useEffect(() => {
+    if (!active) return;
     loadProxies();
     
     try {
@@ -235,16 +241,16 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
       const interval = setInterval(loadProxies, 30000);
       return () => clearInterval(interval);
     }
-  }, [isRunning, loadProxies]);
+  }, [active, isRunning, loadProxies]);
 
   useEffect(() => {
-    if (!isRunning || !lastProxyChange) {
+    if (!active || !isRunning || !lastProxyChange) {
       return;
     }
 
     proxyCache.clear();
     void loadProxies();
-  }, [isRunning, lastProxyChange, loadProxies]);
+  }, [active, isRunning, lastProxyChange, loadProxies]);
 
   if (!isRunning) {
     return (
@@ -288,28 +294,18 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
 
       {loading && <LinearProgress sx={{ mb: 2 }} />}
 
-      {groups.length > 0 && groups[0].name === 'PROXY' && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-              {t('proxy.proxyGroupInfo')}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              • {t('proxy.currentSelection')}: <strong>{groups[0].now || 'N/A'}</strong>
-              {groups[0].now === 'auto' && ` - ${t('proxy.autoDesc')}`}
-              {groups[0].now !== 'auto' && groups[0].now && groups[0].now !== 'DIRECT' && ` - ${t('proxy.fixedDesc')}`}
-              {groups[0].now === 'DIRECT' && ` - ${t('proxy.directDesc')}`}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              • {t('proxy.availableCount')}: {groups[0].all?.length || 0}
-              {groups[0].now !== 'auto' && ` | ${t('proxy.selectAutoTip')}`}
-              {groups[0].now === 'auto' && ` | ${t('proxy.selectManualTip')}`}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {t('proxy.tip')}
-            </Typography>
-          </Box>
-        </Alert>
+      {groups.length > 0 && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 2.5 }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel id="proxy-group-label">{t('proxy.proxyGroup')}</InputLabel>
+            <Select labelId="proxy-group-label" label={t('proxy.proxyGroup')} value={selectedGroup} onChange={(event) => setSelectedGroup(event.target.value)}>
+              {groups.map(group => <MenuItem key={group.name} value={group.name}>{group.name}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Typography variant="body2" color="text.secondary">
+            {t('proxy.currentSelection')}: <strong>{groups.find(group => group.name === selectedGroup)?.now || '—'}</strong>
+          </Typography>
+        </Box>
       )}
 
       {/* Detailed Proxy Management */}
@@ -380,8 +376,10 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {sortNodes(group.all).map((nodeName) => {
-                        const node = proxies[nodeName] as ProxyNode;
+                      {sortNodes([...new Set(group.all)]).map((nodeName) => {
+                        const candidates = proxyCandidates(catalog, nodeName);
+                        const ambiguous = candidates.length > 1;
+                        const node = uniqueProxy(catalog, nodeName) as ProxyNode | undefined;
                         const isActive = group.now === nodeName;
                         const history = node?.history;
                         const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
@@ -398,7 +396,13 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                                 ) : (
                                   <Router sx={{ fontSize: 16, color: 'text.disabled' }} />
                                 )}
-                                <Typography variant="subtitle2">{nodeName}</Typography>
+                                <Box>
+                                  <Typography variant="subtitle2">{nodeName}</Typography>
+                                  {candidates.some(candidate => candidate.provider) && <Typography variant="caption" color="text.secondary">
+                                    {t('proxy.source')}: {candidates.map(candidate => candidate.provider || t('proxy.configSource')).join(' · ')}
+                                  </Typography>}
+                                  {ambiguous && <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>{t('proxy.ambiguousSource')}</Typography>}
+                                </Box>
                               </Box>
                             </TableCell>
                             <TableCell>
@@ -415,6 +419,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                               {(() => {
                                 const hasValidDelay = nodeDelay !== undefined && nodeDelay > 0;
                                 const isOnline = node?.alive === true || hasValidDelay;
+                                if (!node) return <Chip label={t('proxy.unknownStatus')} size="small" color="default" />;
                                 return (
                                   <Chip
                                     icon={isOnline ? <CheckCircle /> : <Error />}
@@ -430,9 +435,9 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                                 variant={isActive ? "outlined" : "contained"}
                                 size="small"
                                 onClick={() => handleSwitchProxy(selectedGroup, nodeName)}
-                                disabled={loading || isActive}
+                                disabled={loading || isActive || group.type !== 'Selector'}
                               >
-                                {isActive ? t('proxy.current') : t('proxy.switch')}
+                                {isActive ? t('proxy.current') : group.type !== 'Selector' ? t('proxy.automaticGroup') : t('proxy.switch')}
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -470,7 +475,7 @@ const ProxyManager: React.FC<ProxyManagerProps> = React.memo(({ isRunning, showN
                   </TableHead>
                   <TableBody>
                     {groupHistory.map((item, index) => {
-                      const node = proxies[item.nodeName] as ProxyNode;
+                      const node = uniqueProxy(catalog, item.nodeName) as ProxyNode | undefined;
                       const history = node?.history;
                       const nodeDelay = (history && history.length > 0) ? history[0]?.delay : undefined;
                       

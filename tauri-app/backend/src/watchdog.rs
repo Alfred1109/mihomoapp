@@ -3,90 +3,52 @@ use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 use tracing::{error, info, warn};
 
+#[path = "watchdog_state.rs"]
+mod state;
+use state::WatchdogState;
+
 pub struct ProcessWatchdog {
-    process_id: Arc<RwLock<Option<u32>>>,
-    auto_restart: Arc<RwLock<bool>>,
+    state: Arc<RwLock<WatchdogState>>,
     app_handle: tauri::AppHandle,
     monitoring: Arc<RwLock<bool>>,
-    last_known_status: Arc<RwLock<bool>>,
-    manual_stop: Arc<RwLock<bool>>, // 标记是否为手动停止
 }
 
-/// 检查 mihomo API 是否可访问（健康检查）
 async fn check_mihomo_api_health() -> bool {
-    match reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => match client.get("http://127.0.0.1:9090/version").send().await {
-            Ok(response) => response.status().is_success(),
-            Err(_) => false,
-        },
-        Err(_) => false,
-    }
+    crate::mihomo::is_mihomo_running().await
 }
 
 impl ProcessWatchdog {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
         Self {
-            process_id: Arc::new(RwLock::new(None)),
-            auto_restart: Arc::new(RwLock::new(true)),
+            state: Arc::new(RwLock::new(WatchdogState::default())),
             app_handle,
             monitoring: Arc::new(RwLock::new(false)),
-            last_known_status: Arc::new(RwLock::new(false)),
-            manual_stop: Arc::new(RwLock::new(false)),
         }
     }
 
     pub async fn set_process(&self, pid: u32) {
-        let mut process_id = self.process_id.write().await;
-        *process_id = Some(pid);
-        // 清除手动停止标志（因为服务正在启动）
-        let mut manual_stop = self.manual_stop.write().await;
-        *manual_stop = false;
+        self.state.write().await.started(pid);
         info!("Watchdog tracking process: {}", pid);
     }
 
     pub async fn clear_process(&self) {
-        let mut process_id = self.process_id.write().await;
-        *process_id = None;
-        drop(process_id);
+        self.take_managed_process().await;
+        info!("Watchdog cleared process tracking (manual stop)");
+    }
 
-        // 设置手动停止标志
-        let mut manual_stop = self.manual_stop.write().await;
-        *manual_stop = true;
-        drop(manual_stop);
-
-        // 同时禁用自动重启，防止竞态条件
-        let mut auto_restart = self.auto_restart.write().await;
-        *auto_restart = false;
-
-        info!("Watchdog cleared process tracking (manual stop, auto-restart disabled)");
+    /// Atomically relinquish ownership intent before the caller performs a stop.
+    /// None is unmanaged, zero is a system service, and a positive PID is an owned child.
+    pub async fn take_managed_process(&self) -> Option<u32> {
+        self.state.write().await.stopped()
     }
 
     pub async fn set_auto_restart(&self, enabled: bool) {
-        let mut auto_restart = self.auto_restart.write().await;
-        *auto_restart = enabled;
+        self.state.write().await.auto_restart = enabled;
         info!("Auto-restart set to: {}", enabled);
     }
 
     pub async fn get_auto_restart(&self) -> bool {
-        let auto_restart = self.auto_restart.read().await;
-        *auto_restart
-    }
-
-    /// 重新启用自动重启（用于用户手动停止后想重新启用）
-    #[allow(dead_code)]
-    pub async fn enable_auto_restart(&self) {
-        let mut auto_restart = self.auto_restart.write().await;
-        *auto_restart = true;
-        drop(auto_restart);
-
-        // 清除手动停止标志
-        let mut manual_stop = self.manual_stop.write().await;
-        *manual_stop = false;
-
-        info!("Auto-restart re-enabled (manual stop flag cleared)");
+        self.state.read().await.auto_restart
     }
 
     pub async fn start_monitoring(&self) {
@@ -98,125 +60,64 @@ impl ProcessWatchdog {
         *monitoring = true;
         drop(monitoring);
 
-        let process_id = self.process_id.clone();
-        let auto_restart = self.auto_restart.clone();
+        let state = self.state.clone();
         let app_handle = self.app_handle.clone();
         let monitoring_flag = self.monitoring.clone();
-        let last_known_status = self.last_known_status.clone();
-        let manual_stop = self.manual_stop.clone();
 
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(3));
-            let mut restart_count = 0;
-            let max_restart_attempts = 5;
-            let restart_window = Duration::from_secs(60);
-            let mut last_restart_time = std::time::Instant::now();
-
+            let mut last_known_status = None;
             info!("Watchdog monitoring started (API health check mode)");
 
             loop {
                 interval.tick().await;
-
-                let should_continue = {
-                    let monitoring = monitoring_flag.read().await;
-                    *monitoring
-                };
-
-                if !should_continue {
+                if !*monitoring_flag.read().await {
                     info!("Watchdog monitoring stopped");
                     break;
                 }
 
-                // 使用 API 健康检查替代进程检查
                 let api_healthy = check_mihomo_api_health().await;
-
-                let last_status = {
-                    let status = last_known_status.read().await;
-                    *status
-                };
-
-                // 只在状态变化时发送事件
-                if api_healthy != last_status {
-                    info!("Mihomo status changed: {} -> {}", last_status, api_healthy);
-
-                    {
-                        let mut status = last_known_status.write().await;
-                        *status = api_healthy;
-                    }
-
+                let health_changed = last_known_status != Some(api_healthy);
+                if health_changed {
+                    last_known_status = Some(api_healthy);
                     crate::events::emit_mihomo_status(
                         &app_handle,
                         crate::events::MihomoStatusEvent {
                             running: api_healthy,
-                            process_id: None,
+                            process_id: state.read().await.process_id,
                             timestamp: crate::events::get_current_timestamp(),
                         },
                     );
+                }
 
-                    // 如果服务停止且启用了自动重启
-                    if !api_healthy {
-                        warn!("Mihomo API is not responding, service may have stopped");
-
-                        {
-                            let mut pid_lock = process_id.write().await;
-                            *pid_lock = None;
+                // Keep the intent lock until the start operation finishes. A stop
+                // request then clears intent before its caller stops that process.
+                let mut runtime = state.write().await;
+                let process_exited = if runtime.process_id.is_some_and(|pid| pid > 0) {
+                    match crate::mihomo::owned_process_exited().await {
+                        Ok(exited) => exited,
+                        Err(e) => {
+                            error!("Cannot inspect owned Mihomo process: {}", e);
+                            continue;
                         }
-
-                        let should_restart = {
-                            let restart_lock = auto_restart.read().await;
-                            *restart_lock
-                        };
-
-                        // 检查是否为手动停止
-                        let is_manual_stop = {
-                            let manual_stop_lock = manual_stop.read().await;
-                            *manual_stop_lock
-                        };
-
-                        if should_restart && !is_manual_stop {
-                            let now = std::time::Instant::now();
-                            if now.duration_since(last_restart_time) > restart_window {
-                                restart_count = 0;
-                            }
-
-                            if restart_count >= max_restart_attempts {
-                                error!(
-                                    "Max restart attempts ({}) reached within {} seconds, giving up",
-                                    max_restart_attempts,
-                                    restart_window.as_secs()
-                                );
-                                continue;
-                            }
-
-                            restart_count += 1;
-                            last_restart_time = now;
-
-                            info!(
-                                "Auto-restarting mihomo (attempt {}/{})",
-                                restart_count, max_restart_attempts
-                            );
-
-                            tokio::time::sleep(Duration::from_secs(2)).await;
-
-                            match crate::mihomo::start_mihomo().await {
-                                Ok(new_pid) => {
-                                    info!("Mihomo restarted successfully with PID: {}", new_pid);
-
-                                    {
-                                        let mut pid_lock = process_id.write().await;
-                                        *pid_lock = Some(new_pid);
-                                    }
-
-                                    restart_count = 0;
-                                }
-                                Err(e) => {
-                                    error!("Failed to restart mihomo: {}", e);
-                                }
-                            }
+                    }
+                } else {
+                    false
+                };
+                if !api_healthy && !process_exited && health_changed {
+                    warn!("Mihomo controller is unavailable; no owned process exit was observed");
+                }
+                if let Some(attempt) =
+                    runtime.reserve_restart(api_healthy, process_exited, std::time::Instant::now())
+                {
+                    info!("Auto-restarting mihomo (attempt {}/5)", attempt);
+                    match crate::mihomo::start_mihomo().await {
+                        Ok(pid) => {
+                            runtime.process_id = Some(pid);
+                            // Only an observed healthy controller resets the budget.
+                            info!("Mihomo recovery started with PID: {}", pid);
                         }
-                    } else {
-                        // 服务恢复运行，重置重启计数
-                        restart_count = 0;
+                        Err(e) => error!("Failed to restart mihomo: {}", e),
                     }
                 }
             }

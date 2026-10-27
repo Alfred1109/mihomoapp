@@ -16,7 +16,7 @@ unified-delay: true                  # 统一延迟测试
 tcp-concurrent: true                 # TCP 并发连接
 keep-alive-interval: 30              # Keep-Alive 间隔（秒）
 find-process-mode: strict            # 进程匹配模式
-global-client-fingerprint: chrome   # 全局客户端指纹
+# client-fingerprint 请直接设置在各 TLS 代理节点中（例如 chrome）；全局字段已被内核移除
 
 # 🧠 DNS 智能配置（三层架构）
 dns:

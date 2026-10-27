@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, IconButton, Typography } from '@mui/material';
-import { CropSquare, Close, Remove } from '@mui/icons-material';
+import { CropSquare, Close, Remove, HubRounded } from '@mui/icons-material';
+import { useTranslation } from 'react-i18next';
 import { appWindow } from '@tauri-apps/api/window';
 
 interface TitleBarProps {
@@ -9,6 +10,7 @@ interface TitleBarProps {
 }
 
 const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children }) => {
+  const { t } = useTranslation();
   const handleMinimize = () => appWindow.minimize();
   const handleMaximize = () => appWindow.toggleMaximize();
   const handleClose = () => appWindow.hide(); // 最小化到托盘而不是退出
@@ -16,7 +18,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children 
   return (
     <Box
       sx={{
-        height: 38,
+        height: 48,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -30,15 +32,9 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children 
       data-tauri-drag-region
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pl: 1 }}>
-        <Box
-          component="img"
-          src="/icons/32x32.png"
-          alt="logo"
-          sx={{ width: 18, height: 18 }}
-          onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
+        <Box sx={{ width: 25, height: 25, display: 'grid', placeItems: 'center', borderRadius: 1.5, background: 'linear-gradient(145deg, #72bcff, #4388df)', color: '#0a203b', boxShadow: '0 3px 12px rgba(71, 148, 231, 0.25)' }}>
+          <HubRounded sx={{ fontSize: 17 }} />
+        </Box>
         <Typography
           variant="body2"
           sx={{
@@ -61,14 +57,15 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children 
         }}
       >
         {children}
-        
+
         <IconButton
           size="small"
           onClick={handleMinimize}
+          aria-label={t('app.minimize')}
           sx={{
             borderRadius: 0,
             width: 46,
-            height: 38,
+            height: 48,
             color: 'text.secondary',
             '&:hover': {
               backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -82,10 +79,11 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children 
         <IconButton
           size="small"
           onClick={handleMaximize}
+          aria-label={t('app.maximize')}
           sx={{
             borderRadius: 0,
             width: 46,
-            height: 38,
+            height: 48,
             color: 'text.secondary',
             '&:hover': {
               backgroundColor: 'rgba(255, 255, 255, 0.06)',
@@ -99,10 +97,11 @@ const TitleBar: React.FC<TitleBarProps> = ({ title = 'Mihomo Manager', children 
         <IconButton
           size="small"
           onClick={handleClose}
+          aria-label={t('app.hideWindow')}
           sx={{
             borderRadius: 0,
             width: 46,
-            height: 38,
+            height: 48,
             color: 'text.secondary',
             '&:hover': {
               backgroundColor: '#c42b1c',

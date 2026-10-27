@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Card,
@@ -64,10 +64,14 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   void isRunning;
   const { t } = useTranslation();
   const lastConfigChange = useAppStore((state) => state.lastConfigChange);
+  const initialized = useRef(false);
   const [config, setConfig] = useState<ConfigValue | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadDialog, setReloadDialog] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [configText, setConfigText] = useState('');
+  const [editorDirty, setEditorDirty] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [autostart, setAutostart] = useState(false);
   const [silentStart, setSilentStart] = useState(false);
@@ -85,9 +89,12 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     try {
       const configData = await invoke<ConfigValue>('get_mihomo_config');
       setConfig(configData);
+      setLoadError(false);
       setConfigText(JSON.stringify(configData, null, 2));
       setHasChanges(false);
+      setEditorDirty(false);
     } catch (error) {
+      setLoadError(true);
       showNotification(`${t('config.loadFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
@@ -247,6 +254,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
     try {
       const parsedConfig = JSON.parse(configText);
       setConfig(parsedConfig);
+      setEditorDirty(false);
       setHasChanges(true);
       showNotification(t('config.loadedFromEditor'), 'success');
     } catch {
@@ -322,31 +330,34 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   };
 
   useEffect(() => {
-    loadConfig();
-    loadAppSettings();
+    if (initialized.current) return;
+    initialized.current = true;
+    void loadConfig();
+    void loadAppSettings();
   }, [loadConfig]);
 
   useEffect(() => {
-    if (config) {
+    if (config && !editorDirty) {
       setConfigText(JSON.stringify(config, null, 2));
     }
-  }, [config]);
+  }, [config, editorDirty]);
 
   useEffect(() => {
-    if (!lastConfigChange || hasChanges) {
+    if (!lastConfigChange || hasChanges || editorDirty) {
       return;
     }
 
     void loadConfig();
     void loadBackups();
-  }, [hasChanges, lastConfigChange, loadBackups, loadConfig]);
+  }, [editorDirty, hasChanges, lastConfigChange, loadBackups, loadConfig]);
 
   if (!config) {
     return (
       <Card>
         <CardContent sx={{ textAlign: 'center', py: 8 }}>
           <Settings sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" gutterBottom>加载配置中...</Typography>
+          <Typography variant="h6" gutterBottom>{loadError ? t('config.loadFailed') : t('common.loading')}</Typography>
+          {loadError && <Button variant="outlined" startIcon={<Refresh />} onClick={loadConfig} disabled={loading}>{t('config.reload')}</Button>}
         </CardContent>
       </Card>
     );
@@ -355,30 +366,35 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h5">配置管理</Typography>
+        <Typography variant="h5">{t('config.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {hasChanges && <Chip label="未保存的更改" color="warning" size="small" />}
-          <Button variant="outlined" startIcon={<Refresh />} onClick={loadConfig} disabled={loading}>
-            重新加载
+          {(hasChanges || editorDirty) && <Chip label={t('config.unsavedChanges')} color="warning" size="small" />}
+          <Button variant="outlined" startIcon={<Refresh />} onClick={() => (hasChanges || editorDirty) ? setReloadDialog(true) : void loadConfig()} disabled={loading}>
+            {t('config.reload')}
           </Button>
-          <Button variant="contained" startIcon={<Save />} onClick={saveConfig} disabled={loading || !hasChanges}>
-            保存
+          <Button variant="contained" startIcon={<Save />} onClick={saveConfig} disabled={loading || !hasChanges || editorDirty}>
+            {t('config.save')}
           </Button>
         </Box>
       </Box>
 
+      <Dialog open={reloadDialog} onClose={() => setReloadDialog(false)}>
+        <DialogTitle>{t('config.reloadConfirmTitle')}</DialogTitle>
+        <DialogContent><DialogContentText>{t('config.reloadConfirmDesc')}</DialogContentText></DialogContent>
+        <DialogActions><Button onClick={() => setReloadDialog(false)}>{t('common.cancel')}</Button><Button onClick={() => { setReloadDialog(false); void loadConfig(); }} variant="contained">{t('config.reload')}</Button></DialogActions>
+      </Dialog>
       <Card>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={tabValue} onChange={handleTabChange}>
-            <Tab icon={<NetworkCheck />} label="常规" />
-            <Tab icon={<Security />} label="代理" />
-            <Tab icon={<Dns />} label="DNS" />
-            <Tab icon={<Code />} label="高级" />
-            <Tab icon={<History />} label="备份与恢复" />
+            <Tab id="config-tab-0" aria-controls="config-tabpanel-0" icon={<NetworkCheck />} label="常规" />
+            <Tab id="config-tab-1" aria-controls="config-tabpanel-1" icon={<Security />} label="代理" />
+            <Tab id="config-tab-2" aria-controls="config-tabpanel-2" icon={<Dns />} label="DNS" />
+            <Tab id="config-tab-3" aria-controls="config-tabpanel-3" icon={<Code />} label="高级" />
+            <Tab id="config-tab-4" aria-controls="config-tabpanel-4" icon={<History />} label="备份与恢复" />
           </Tabs>
         </Box>
 
-        <TabPanel value={tabValue} index={0}>
+        <TabPanel idPrefix="config-" value={tabValue} index={0}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>基本设置</Typography>
@@ -451,7 +467,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
           </Grid>
         </TabPanel>
 
-        <TabPanel value={tabValue} index={1}>
+        <TabPanel idPrefix="config-" value={tabValue} index={1}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>代理设置</Typography>
@@ -485,7 +501,7 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
           </Grid>
         </TabPanel>
 
-        <TabPanel value={tabValue} index={2}>
+        <TabPanel idPrefix="config-" value={tabValue} index={2}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="h6" gutterBottom>DNS 设置</Typography>
@@ -519,20 +535,21 @@ const ConfigManager: React.FC<ConfigManagerProps> = React.memo(({ isRunning, sho
           </Grid>
         </TabPanel>
 
-        <TabPanel value={tabValue} index={3}>
+        <TabPanel idPrefix="config-" value={tabValue} index={3}>
           <Typography variant="h6" gutterBottom>原始配置 (JSON)</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>直接编辑原始配置。请注意语法正确性。</Typography>
           <Paper sx={{ p: 2, mb: 2 }}>
-            <TextField multiline rows={20} value={configText} onChange={(e) => setConfigText(e.target.value)}
+            <TextField multiline rows={20} value={configText} onChange={(e) => { setConfigText(e.target.value); setEditorDirty(true); }}
               fullWidth variant="outlined" sx={{ fontFamily: 'monospace' }} />
           </Paper>
+          {editorDirty && <Alert severity="info" sx={{ mb: 2 }}>{t('config.editorPending')}</Alert>}
           <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button variant="outlined" onClick={loadConfig}>从服务器重新加载</Button>
-            <Button variant="contained" onClick={applyTextConfig}>应用更改</Button>
+            <Button variant="outlined" onClick={() => (hasChanges || editorDirty) ? setReloadDialog(true) : void loadConfig()}>{t('config.reload')}</Button>
+            <Button variant="contained" onClick={applyTextConfig}>{t('config.applyEditor')}</Button>
           </Box>
         </TabPanel>
 
-        <TabPanel value={tabValue} index={4}>
+        <TabPanel idPrefix="config-" value={tabValue} index={4}>
           <Alert severity="info" sx={{ mb: 3 }}>
             <strong>架构说明：</strong>配置分为「基础配置」（DNS、TUN、规则等）和「订阅链接」两部分。
             恢复默认配置只会重置基础配置，不会影响订阅链接。

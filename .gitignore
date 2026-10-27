@@ -68,3 +68,6 @@ server/config/
 # Temporary scripts
 test_*.sh
 *_fixed.deb
+
+# Local development preview process state
+.runtime/

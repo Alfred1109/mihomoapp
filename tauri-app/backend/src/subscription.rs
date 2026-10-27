@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
-use tracing::{debug, info, warn};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 fn build_subscription_request(
@@ -45,6 +47,8 @@ pub struct Subscription {
     pub last_error: Option<String>,
     #[serde(default)]
     pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    update_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,11 +69,7 @@ pub async fn add_subscription(
     user_agent: Option<String>,
     use_proxy: bool,
 ) -> Result<String> {
-    let mut storage = load_subscriptions().await.unwrap_or_default();
-
     let id = Uuid::new_v4().to_string();
-    let file = format!("{}.yaml", id);
-
     let subscription = Subscription {
         id: id.clone(),
         name,
@@ -81,123 +81,177 @@ pub async fn add_subscription(
         proxy_count: 0,
         status: SubscriptionStatus::Active,
         last_error: None,
-        file: Some(file),
+        file: Some(format!("{}.yaml", id)),
+        update_token: None,
     };
-
-    storage
-        .subscriptions
-        .insert(subscription.id.clone(), subscription);
-    save_subscriptions(&storage).await?;
-
+    mutate_store(move |_, storage| {
+        storage
+            .subscriptions
+            .insert(subscription.id.clone(), subscription);
+        Ok(())
+    })
+    .await?;
     Ok(id)
 }
 
 pub async fn get_subscriptions() -> Result<Vec<Subscription>> {
-    let storage = load_subscriptions().await.unwrap_or_default();
-    Ok(storage.subscriptions.values().cloned().collect())
+    Ok(load_subscriptions()
+        .await?
+        .subscriptions
+        .values()
+        .cloned()
+        .collect())
 }
 
 pub async fn update_subscription(id: &str) -> Result<()> {
-    let mut storage = load_subscriptions().await.unwrap_or_default();
-
-    if let Some(subscription) = storage.subscriptions.get_mut(id) {
+    let id = id.to_string();
+    let token = Uuid::new_v4().to_string();
+    let request_id = id.clone();
+    let request_token = token.clone();
+    let subscription = mutate_store(move |_, storage| {
+        let subscription = storage
+            .subscriptions
+            .get_mut(&request_id)
+            .context("Subscription not found")?;
         subscription.status = SubscriptionStatus::Updating;
-        if subscription.file.is_none() {
-            subscription.file = Some(format!("{}.yaml", id));
+        subscription.update_token = Some(request_token);
+        Ok(subscription.clone())
+    })
+    .await?;
+
+    // No storage lock is held while downloading or parsing the subscription.
+    let fetched = fetch_and_save_subscription(&subscription).await;
+    let (raw_content, proxies) = match fetched {
+        Ok(result) => result,
+        Err(error) => {
+            set_update_error(id, token, format!("获取订阅失败: {}", error)).await?;
+            return Err(error);
         }
-        let subscription_clone = subscription.clone();
-        save_subscriptions(&storage).await?;
-
-        match fetch_and_save_subscription(&subscription_clone).await {
-            Ok((raw_content, proxies)) => {
-                let proxy_count = proxies.len() as u32;
-
-                save_profile_content(id, &raw_content).await?;
-
-                storage = load_subscriptions().await.unwrap_or_default();
-                if let Some(sub) = storage.subscriptions.get_mut(id) {
-                    sub.status = SubscriptionStatus::Active;
-                    sub.proxy_count = proxy_count;
-                    sub.last_updated = chrono::Utc::now().to_rfc3339();
-                    sub.last_error = None;
-                    sub.file = Some(format!("{}.yaml", id));
-                }
-                save_subscriptions(&storage).await?;
-
-                let active_ids: Vec<String> = storage
-                    .subscriptions
-                    .values()
-                    .filter(|s| s.status == SubscriptionStatus::Active && s.proxy_count > 0)
-                    .map(|s| s.id.clone())
-                    .collect();
-
-                if !active_ids.is_empty() {
-                    if let Err(err) = generate_config_from_subscriptions(active_ids).await {
-                        storage = load_subscriptions().await.unwrap_or_default();
-                        if let Some(sub) = storage.subscriptions.get_mut(id) {
-                            sub.status = SubscriptionStatus::Error;
-                            sub.last_error = Some(format!("生成配置失败: {}", err));
-                        }
-                        save_subscriptions(&storage).await?;
-                        return Err(err);
-                    }
-
-                    info!("✓ 订阅更新成功，配置文件已生成");
-                    info!("提示: 配置已更新。如果Mihomo服务正在运行，请重启服务以应用更改。");
-                }
-            }
-            Err(e) => {
-                storage = load_subscriptions().await.unwrap_or_default();
-                if let Some(sub) = storage.subscriptions.get_mut(id) {
-                    sub.status = SubscriptionStatus::Error;
-                    sub.last_error = Some(format!("获取订阅失败: {}", e));
-                }
-                save_subscriptions(&storage).await?;
-                return Err(e);
-            }
-        }
-    } else {
-        return Err(anyhow::anyhow!("Subscription not found"));
+    };
+    let commit_id = id.clone();
+    let commit_token = token.clone();
+    let committed =
+        commit_profile(commit_id, commit_token, raw_content, proxies.len() as u32).await;
+    if let Err(error) = committed {
+        // A newer operation owns the subscription if its token changed.
+        let _ = set_update_error(id, token, format!("保存订阅失败: {}", error)).await;
+        return Err(error);
     }
 
+    if let Err(error) = generate_subscription_config(None).await {
+        set_update_error(id, token, format!("生成配置失败: {}", error)).await?;
+        return Err(error);
+    }
+    mutate_store(move |_, storage| {
+        let sub = matching_update(storage, &id, &token)?;
+        sub.update_token = None;
+        Ok(())
+    })
+    .await?;
+    info!("✓ 订阅更新成功，配置文件已生成");
     Ok(())
 }
 
-pub async fn delete_subscription(id: &str) -> Result<()> {
-    let mut storage = load_subscriptions().await.unwrap_or_default();
-
-    if storage.subscriptions.remove(id).is_some() {
-        save_subscriptions(&storage).await?;
-
-        if let Err(e) = delete_profile_file(id).await {
-            warn!("删除订阅文件失败: {}", e);
-        }
-
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("Subscription not found"))
+fn matching_update<'a>(
+    storage: &'a mut SubscriptionStorage,
+    id: &str,
+    token: &str,
+) -> Result<&'a mut Subscription> {
+    let sub = storage
+        .subscriptions
+        .get_mut(id)
+        .context("Subscription was deleted during update")?;
+    if sub.update_token.as_deref() != Some(token) {
+        return Err(anyhow::anyhow!("订阅更新已被较新的操作替代"));
     }
+    Ok(sub)
 }
 
+async fn set_update_error(id: String, token: String, message: String) -> Result<()> {
+    mutate_store(move |_, storage| {
+        let sub = matching_update(storage, &id, &token)?;
+        sub.status = SubscriptionStatus::Error;
+        sub.last_error = Some(message);
+        sub.update_token = None;
+        Ok(())
+    })
+    .await
+}
+
+async fn commit_profile(
+    id: String,
+    token: String,
+    content: String,
+    proxy_count: u32,
+) -> Result<()> {
+    with_store(true, move |store| {
+        store.commit_profile(&id, &token, &content, proxy_count)
+    })
+    .await
+}
+
+pub async fn delete_subscription(id: &str) -> Result<()> {
+    let id = id.to_string();
+    with_store(true, move |store| {
+        let mut storage = store.read()?;
+        storage
+            .subscriptions
+            .remove(&id)
+            .context("Subscription not found")?;
+        // Keep historical profiles: existing JSON backups may still reference them.
+        store.write(&storage)
+    })
+    .await
+}
+
+static CONFIG_GENERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -> Result<()> {
-    let storage = load_subscriptions().await.unwrap_or_default();
-    let mut all_proxies = Vec::new();
-    let mut proxy_names = Vec::new();
+    generate_subscription_config(Some(subscription_ids)).await
+}
 
-    for id in subscription_ids {
-        if let Some(subscription) = storage.subscriptions.get(&id) {
-            if subscription.status != SubscriptionStatus::Active {
-                continue;
-            }
-
-            let proxies = match load_proxies_from_profile(&id).await {
-                Ok(p) => p,
-                Err(_) => {
-                    info!("本地文件不存在，从网络获取订阅: {}", subscription.name);
-                    fetch_and_parse_subscription(subscription).await?
+async fn generate_subscription_config(subscription_ids: Option<Vec<String>>) -> Result<()> {
+    // Serialize builders in this process; the metadata comparison below also protects
+    // against updates performed by another application process.
+    let _generation_guard = CONFIG_GENERATION_LOCK.lock().await;
+    for _ in 0..5 {
+        let selected_ids = subscription_ids.clone();
+        let (revision, profiles) = with_store(false, move |store| {
+            let storage = store.read()?;
+            let revision = serde_json::to_value(&storage)?;
+            let ids = selected_ids.unwrap_or_else(|| {
+                storage
+                    .subscriptions
+                    .values()
+                    .filter(|sub| sub.status == SubscriptionStatus::Active && sub.proxy_count > 0)
+                    .map(|sub| sub.id.clone())
+                    .collect()
+            });
+            let mut profiles = Vec::new();
+            for id in ids {
+                if let Some(subscription) = storage.subscriptions.get(&id) {
+                    if subscription.status == SubscriptionStatus::Active {
+                        let content = store
+                            .profile_path(subscription)
+                            .and_then(|path| fs::read_to_string(path).context("读取订阅缓存失败"));
+                        profiles.push((subscription.clone(), content));
+                    }
                 }
-            };
-
+            }
+            Ok((revision, profiles))
+        })
+        .await?;
+        let mut all_proxies = Vec::new();
+        let mut proxy_names = Vec::new();
+        for (subscription, cached_content) in profiles {
+            let proxies =
+                match cached_content.and_then(|content| parse_subscription_content(&content)) {
+                    Ok(proxies) => proxies,
+                    Err(_) => {
+                        info!("本地文件不可用，从网络获取订阅: {}", subscription.name);
+                        fetch_and_parse_subscription(&subscription).await?
+                    }
+                };
             for proxy in proxies {
                 if let Some(name) = proxy["name"].as_str() {
                     proxy_names.push(name.to_string());
@@ -205,53 +259,29 @@ pub async fn generate_config_from_subscriptions(subscription_ids: Vec<String>) -
                 }
             }
         }
-    }
-
-    if all_proxies.is_empty() {
-        return Err(anyhow::anyhow!("没有找到任何代理节点"));
-    }
-
-    let merged_config = crate::base_config::merge_with_proxies(all_proxies, proxy_names).await?;
-
-    crate::config::save_config(merged_config.clone()).await?;
-
-    match crate::validator::validate_config(&merged_config).await {
-        Ok(result) => {
-            if !result.valid {
-                warn!("⚠ 配置验证失败:");
-                for error in &result.errors {
-                    warn!("  ✗ {}", error);
-                }
-                return Err(anyhow::anyhow!(
-                    "配置验证失败: {}",
-                    result.errors.join(", ")
-                ));
-            }
-
-            if !result.warnings.is_empty() {
-                warn!("⚠ 配置警告:");
-                for warning in &result.warnings {
-                    warn!("  ! {}", warning);
-                }
-            }
-
-            info!("✓ 配置验证通过");
+        if all_proxies.is_empty() {
+            return Err(anyhow::anyhow!("没有找到任何代理节点"));
         }
-        Err(e) => {
-            warn!("⚠ 配置验证出错: {}", e);
+        let merged_config =
+            crate::base_config::merge_with_proxies(all_proxies, proxy_names).await?;
+        let committed = with_store(true, move |store| {
+            store.commit_if_current(&revision, || {
+                // The file lock spans verification and the final config commit,
+                // never a download. ConfigManager does not acquire this lock.
+                tokio::runtime::Handle::current()
+                    .block_on(crate::config::save_validated_config(merged_config))
+            })
+        })
+        .await?;
+        if committed {
+            return Ok(());
         }
     }
-
-    Ok(())
-}
-
-async fn load_proxies_from_profile(id: &str) -> Result<Vec<serde_json::Value>> {
-    let content = load_profile_content(id).await?;
-    parse_subscription_content(&content)
+    Err(anyhow::anyhow!("订阅持续变更，未覆盖当前配置，请稍后重试"))
 }
 
 pub async fn export_subscriptions() -> Result<String> {
-    let storage = load_subscriptions().await.unwrap_or_default();
+    let storage = load_subscriptions().await?;
     let json_content = serde_json::to_string_pretty(&storage).context("序列化订阅数据失败")?;
     info!("导出 {} 个订阅链接", storage.subscriptions.len());
     Ok(json_content)
@@ -265,43 +295,39 @@ pub async fn import_subscriptions(json_content: &str) -> Result<u32> {
         return Err(anyhow::anyhow!("导入的数据中没有订阅链接"));
     }
 
-    let subscriptions_path = get_subscriptions_path()?;
-    if subscriptions_path.exists() {
-        let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
-        std::fs::create_dir_all(&backup_dir)?;
-
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let backup_path =
-            backup_dir.join(format!("subscriptions_before_import_{}.json", timestamp));
-        std::fs::copy(&subscriptions_path, &backup_path)?;
-        info!("已备份当前订阅数据");
-    }
-
     let count = imported_storage.subscriptions.len() as u32;
-    save_subscriptions(&imported_storage).await?;
-
+    let mut imported_storage = imported_storage;
+    for (id, subscription) in &mut imported_storage.subscriptions {
+        if id != &subscription.id {
+            return Err(anyhow::anyhow!("订阅 ID 与存储键不一致"));
+        }
+        subscription.update_token = None;
+    }
+    with_store(true, move |store| {
+        // Explicit import may replace a damaged store, but always backs up its raw bytes first.
+        for subscription in imported_storage.subscriptions.values() {
+            store.profile_path(subscription)?;
+        }
+        if store.path.exists() {
+            let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+            store.backup_to(&backup_dir, "subscriptions_before_import")?;
+        }
+        store.write(&imported_storage)
+    })
+    .await?;
     info!("成功导入 {} 个订阅链接", count);
     Ok(count)
 }
 
 pub async fn backup_subscriptions() -> Result<String> {
-    let subscriptions_path = get_subscriptions_path()?;
-
-    if !subscriptions_path.exists() {
-        return Err(anyhow::anyhow!("没有订阅数据可备份"));
-    }
-
-    let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
-    std::fs::create_dir_all(&backup_dir)?;
-
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_filename = format!("subscriptions_{}.json", timestamp);
-    let backup_path = backup_dir.join(&backup_filename);
-
-    std::fs::copy(&subscriptions_path, &backup_path).context("备份订阅数据失败")?;
-
-    info!("订阅数据已备份到: {:?}", backup_path);
-    Ok(backup_filename)
+    with_store(false, |store| {
+        if !store.path.exists() {
+            return Err(anyhow::anyhow!("没有订阅数据可备份"));
+        }
+        let backup_dir = crate::platform_config::PlatformPaths::backup_dir()?;
+        store.backup_to(&backup_dir, "subscriptions")
+    })
+    .await
 }
 
 pub async fn list_subscription_backups() -> Result<Vec<String>> {
@@ -369,8 +395,7 @@ async fn fetch_and_save_subscription(
     let default_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     let mut client_builder = reqwest::Client::builder()
         .user_agent(subscription.user_agent.as_deref().unwrap_or(default_ua))
-        .timeout(std::time::Duration::from_secs(30))
-        .danger_accept_invalid_certs(true);
+        .timeout(std::time::Duration::from_secs(30));
 
     if !subscription.use_proxy {
         info!(
@@ -391,7 +416,8 @@ async fn fetch_and_save_subscription(
     let response = build_subscription_request(&client, subscription)?
         .send()
         .await
-        .context(format!("无法连接到订阅服务器: {}", subscription.url))?;
+        .map_err(reqwest::Error::without_url)
+        .context("无法连接到订阅服务器")?;
 
     let status = response.status();
     if !status.is_success() {
@@ -446,7 +472,6 @@ async fn fetch_and_parse_subscription(
 
 fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
     debug!("订阅原始内容长度: {} 字节", content.len());
-    debug!("订阅内容前100字符: {}", &content[..content.len().min(100)]);
 
     // Try to decode as base64 first
     let decoded_content = if let Ok(decoded) =
@@ -513,17 +538,13 @@ fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
     let mut proxies = Vec::new();
     let mut errors = Vec::new();
 
-    for line in lines {
+    for (index, line) in lines.into_iter().enumerate() {
         match parse_proxy_url(line) {
             Ok(proxy) => proxies.push(proxy),
             Err(e) => {
                 // Only log errors for lines that look like proxy URLs
                 if line.contains("://") {
-                    errors.push(format!(
-                        "Failed to parse '{}': {}",
-                        &line[..line.len().min(50)],
-                        e
-                    ));
+                    errors.push(format!("第 {} 行代理解析失败: {}", index + 1, e));
                 }
             }
         }
@@ -531,10 +552,7 @@ fn parse_subscription_content(content: &str) -> Result<Vec<serde_json::Value>> {
 
     if proxies.is_empty() {
         let error_msg = if errors.is_empty() {
-            format!(
-                "订阅内容中未找到有效的代理节点。内容预览:\n{}",
-                &decoded_content[..decoded_content.len().min(500)]
-            )
+            "订阅内容中未找到有效的代理节点".to_string()
         } else {
             format!(
                 "订阅内容中未找到有效的代理节点。解析错误:\n{}",
@@ -564,10 +582,7 @@ fn parse_proxy_url(url: &str) -> Result<serde_json::Value> {
     } else if url.starts_with("hysteria2://") || url.starts_with("hy2://") {
         parse_hysteria2_url(url)
     } else {
-        Err(anyhow::anyhow!(
-            "Unsupported proxy URL format: {}",
-            &url[..url.len().min(20)]
-        ))
+        Err(anyhow::anyhow!("Unsupported proxy URL format"))
     }
 }
 
@@ -729,6 +744,47 @@ fn parse_shadowsocksr_url(url: &str) -> Result<serde_json::Value> {
     Ok(proxy)
 }
 
+// Only explicit subscription settings may disable certificate verification.
+// Reject contradictory aliases instead of silently weakening a secure setting.
+fn parse_skip_cert_verify<'a>(
+    settings: impl IntoIterator<Item = (&'a str, &'a serde_json::Value)>,
+) -> Result<bool> {
+    let mut selected = None;
+    for (key, value) in settings {
+        let enabled = match value {
+            serde_json::Value::Bool(value) => *value,
+            serde_json::Value::Number(value) if value.as_u64() == Some(1) => true,
+            serde_json::Value::Number(value) if value.as_u64() == Some(0) => false,
+            serde_json::Value::String(value) => match value.as_str() {
+                "1" | "true" => true,
+                "0" | "false" => false,
+                _ => return Err(anyhow::anyhow!("Invalid TLS boolean for {}", key)),
+            },
+            _ => return Err(anyhow::anyhow!("Invalid TLS boolean for {}", key)),
+        };
+        if selected.is_some_and(|previous| previous != enabled) {
+            return Err(anyhow::anyhow!(
+                "Conflicting TLS certificate verification settings"
+            ));
+        }
+        selected = Some(enabled);
+    }
+    Ok(selected.unwrap_or(false))
+}
+
+fn query_skip_cert_verify(params: &HashMap<String, String>) -> Result<bool> {
+    let settings: Vec<(&str, serde_json::Value)> =
+        ["allowInsecure", "insecure", "skip-cert-verify"]
+            .iter()
+            .filter_map(|key| {
+                params
+                    .get(*key)
+                    .map(|value| (*key, serde_json::Value::String(value.clone())))
+            })
+            .collect();
+    parse_skip_cert_verify(settings.iter().map(|(key, value)| (*key, value)))
+}
+
 fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
     let url = url
         .strip_prefix("vmess://")
@@ -784,7 +840,11 @@ fn parse_vmess_url(url: &str) -> Result<serde_json::Value> {
         "alterId": alter_id,
         "cipher": config["scy"].as_str().unwrap_or("auto"),
         "tls": tls,
-        "skip-cert-verify": true,
+        "skip-cert-verify": parse_skip_cert_verify(
+            ["allowInsecure", "insecure", "skip-cert-verify"]
+                .iter()
+                .filter_map(|key| config.get(*key).map(|value| (*key, value)))
+        )?,
         "udp": true
     });
 
@@ -900,7 +960,7 @@ fn parse_trojan_url(url: &str) -> Result<serde_json::Value> {
         "server": server,
         "port": port,
         "password": password,
-        "skip-cert-verify": true,
+        "skip-cert-verify": query_skip_cert_verify(&params)?,
         "udp": true
     });
 
@@ -1020,7 +1080,7 @@ fn parse_vless_url(url: &str) -> Result<serde_json::Value> {
         "server": server,
         "port": port,
         "uuid": uuid,
-        "skip-cert-verify": true,
+        "skip-cert-verify": query_skip_cert_verify(&params)?,
         "udp": true
     });
 
@@ -1166,7 +1226,7 @@ fn parse_hysteria2_url(url: &str) -> Result<serde_json::Value> {
         "server": server,
         "port": port,
         "password": password,
-        "skip-cert-verify": true
+        "skip-cert-verify": query_skip_cert_verify(&params)?
     });
 
     if let Some(sni) = params.get("sni") {
@@ -1236,86 +1296,194 @@ fn decode_base64_flexible(input: &str) -> Result<String> {
     Err(anyhow::anyhow!("Failed to decode base64 string"))
 }
 
-async fn load_subscriptions() -> Result<SubscriptionStorage> {
-    let path = get_subscriptions_path()?;
-
-    if !path.exists() {
-        return Ok(SubscriptionStorage {
-            subscriptions: HashMap::new(),
-        });
-    }
-
-    let content = fs::read_to_string(&path).context("Failed to read subscriptions file")?;
-
-    let storage: SubscriptionStorage =
-        serde_json::from_str(&content).context("Failed to parse subscriptions file")?;
-
-    Ok(storage)
+struct SubscriptionStore {
+    path: PathBuf,
+    profiles_dir: PathBuf,
 }
 
-async fn save_subscriptions(storage: &SubscriptionStorage) -> Result<()> {
-    let path = get_subscriptions_path()?;
-
-    // Ensure data directory exists
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("Failed to create data directory")?;
+impl SubscriptionStore {
+    fn lock<T>(&self, exclusive: bool, operation: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
+        let parent = self
+            .path
+            .parent()
+            .context("Missing subscription data directory")?;
+        fs::create_dir_all(parent).context("Failed to create subscription data directory")?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.path.with_extension("lock"))
+            .context("Failed to open subscription lock")?;
+        if exclusive {
+            FileExt::lock_exclusive(&lock)?;
+        } else {
+            FileExt::lock_shared(&lock)?;
+        }
+        let result = operation(self);
+        let _ = FileExt::unlock(&lock);
+        result
     }
 
-    let content =
-        serde_json::to_string_pretty(storage).context("Failed to serialize subscriptions")?;
+    fn read(&self) -> Result<SubscriptionStorage> {
+        let content = match fs::read_to_string(&self.path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(SubscriptionStorage::default())
+            }
+            Err(error) => return Err(error).context("Failed to read subscriptions file"),
+        };
+        serde_json::from_str(&content).context("订阅数据损坏，已保留原文件；请从备份恢复")
+    }
 
-    fs::write(&path, content).context("Failed to write subscriptions file")?;
+    fn write(&self, storage: &SubscriptionStorage) -> Result<()> {
+        atomic_write(&self.path, serde_json::to_vec_pretty(storage)?.as_slice())
+    }
 
-    Ok(())
+    fn transaction<T>(
+        &self,
+        operation: impl FnOnce(&Self, &mut SubscriptionStorage) -> Result<T>,
+    ) -> Result<T> {
+        let mut storage = self.read()?;
+        let result = operation(self, &mut storage)?;
+        self.write(&storage)?;
+        Ok(result)
+    }
+
+    fn commit_if_current(
+        &self,
+        revision: &serde_json::Value,
+        commit: impl FnOnce() -> Result<()>,
+    ) -> Result<bool> {
+        if serde_json::to_value(self.read()?)? != *revision {
+            return Ok(false);
+        }
+        commit()?;
+        Ok(true)
+    }
+
+    fn profile_path(&self, subscription: &Subscription) -> Result<PathBuf> {
+        let filename = subscription
+            .file
+            .clone()
+            .unwrap_or_else(|| format!("{}.yaml", subscription.id));
+        let mut components = Path::new(&filename).components();
+        if !matches!(components.next(), Some(Component::Normal(_)))
+            || components.next().is_some()
+            || filename.contains('\\')
+        {
+            return Err(anyhow::anyhow!("Invalid subscription profile filename"));
+        }
+        Ok(self.profiles_dir.join(filename))
+    }
+
+    fn commit_profile(&self, id: &str, token: &str, content: &str, proxy_count: u32) -> Result<()> {
+        self.commit_profile_using(id, token, content, proxy_count, |storage| {
+            self.write(storage)
+        })
+    }
+
+    fn commit_profile_using(
+        &self,
+        id: &str,
+        token: &str,
+        content: &str,
+        proxy_count: u32,
+        persist: impl FnOnce(&SubscriptionStorage) -> Result<()>,
+    ) -> Result<()> {
+        let mut storage = self.read()?;
+        let sub = matching_update(&mut storage, id, token)?;
+        // Immutable candidates make the metadata rename the single commit point.
+        sub.file = Some(format!("{}.yaml", Uuid::new_v4()));
+        let candidate = self.profile_path(sub)?;
+        atomic_write(&candidate, content.as_bytes())?;
+        sub.status = SubscriptionStatus::Active;
+        sub.proxy_count = proxy_count;
+        sub.last_updated = chrono::Utc::now().to_rfc3339();
+        sub.last_error = None;
+        if let Err(error) = persist(&storage) {
+            let _ = fs::remove_file(candidate);
+            return Err(error);
+        }
+        // Historical profiles are retained because metadata backups reference them.
+        // Garbage collection must first enumerate live and backup references.
+        Ok(())
+    }
+
+    fn backup_to(&self, backup_dir: &Path, prefix: &str) -> Result<String> {
+        fs::create_dir_all(backup_dir)?;
+        let filename = format!(
+            "{}_{}_{}.json",
+            prefix,
+            chrono::Utc::now().format("%Y%m%d_%H%M%S"),
+            Uuid::new_v4()
+        );
+        let content = fs::read(&self.path).context("读取待备份订阅失败")?;
+        atomic_write(&backup_dir.join(&filename), &content)?;
+        Ok(filename)
+    }
+}
+
+fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+    let parent = path.parent().context("Missing file directory")?;
+    fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(".subscription-{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, path).context("Failed to replace subscription file")?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+async fn with_store<T: Send + 'static>(
+    exclusive: bool,
+    operation: impl FnOnce(&SubscriptionStore) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    // Blocking filesystem locks never occupy a Tokio runtime worker or span a network await.
+    tokio::task::spawn_blocking(move || {
+        let store = SubscriptionStore {
+            path: get_subscriptions_path()?,
+            profiles_dir: get_profiles_dir()?,
+        };
+        store.lock(exclusive, operation)
+    })
+    .await
+    .context("Subscription storage task failed")?
+}
+
+async fn mutate_store<T: Send + 'static>(
+    operation: impl FnOnce(&SubscriptionStore, &mut SubscriptionStorage) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    with_store(true, move |store| store.transaction(operation)).await
+}
+
+async fn load_subscriptions() -> Result<SubscriptionStorage> {
+    with_store(false, SubscriptionStore::read).await
 }
 
 fn get_subscriptions_path() -> Result<PathBuf> {
-    let config_dir = dirs::config_dir()
+    Ok(dirs::config_dir()
         .context("Failed to get config directory")?
         .join("mihomo")
-        .join("data");
-
-    Ok(config_dir.join("subscriptions.json"))
+        .join("data")
+        .join("subscriptions.json"))
 }
 
 fn get_profiles_dir() -> Result<PathBuf> {
-    let profiles_dir = dirs::config_dir()
+    Ok(dirs::config_dir()
         .context("Failed to get config directory")?
         .join("mihomo")
-        .join("profiles");
-
-    fs::create_dir_all(&profiles_dir).context("Failed to create profiles directory")?;
-
-    Ok(profiles_dir)
-}
-
-fn get_profile_path(id: &str) -> Result<PathBuf> {
-    let profiles_dir = get_profiles_dir()?;
-    Ok(profiles_dir.join(format!("{}.yaml", id)))
-}
-
-async fn save_profile_content(id: &str, content: &str) -> Result<()> {
-    let path = get_profile_path(id)?;
-    fs::write(&path, content).context("Failed to write profile file")?;
-    info!("订阅内容已保存到: {:?}", path);
-    Ok(())
-}
-
-async fn load_profile_content(id: &str) -> Result<String> {
-    let path = get_profile_path(id)?;
-    if !path.exists() {
-        return Err(anyhow::anyhow!("Profile file not found: {:?}", path));
-    }
-    fs::read_to_string(&path).context("Failed to read profile file")
-}
-
-async fn delete_profile_file(id: &str) -> Result<()> {
-    let path = get_profile_path(id)?;
-    if path.exists() {
-        fs::remove_file(&path).context("Failed to delete profile file")?;
-        info!("已删除订阅文件: {:?}", path);
-    }
-    Ok(())
+        .join("profiles"))
 }
 
 impl PartialEq for SubscriptionStatus {
@@ -1326,5 +1494,442 @@ impl PartialEq for SubscriptionStatus {
                 | (SubscriptionStatus::Error, SubscriptionStatus::Error)
                 | (SubscriptionStatus::Updating, SubscriptionStatus::Updating)
         )
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use base64::Engine;
+
+    fn vmess_url(setting: Option<(&str, serde_json::Value)>) -> String {
+        let mut config = serde_json::json!({
+            "add": "example.com", "port": 443,
+            "id": "00000000-0000-0000-0000-000000000001", "tls": "tls"
+        });
+        if let Some((key, value)) = setting {
+            config[key] = value;
+        }
+        format!(
+            "vmess://{}",
+            base64::engine::general_purpose::STANDARD.encode(config.to_string())
+        )
+    }
+
+    #[test]
+    fn imported_links_verify_certificates_by_default() {
+        let urls = [
+            vmess_url(None),
+            "trojan://password@example.com:443".to_string(),
+            "vless://id@example.com:443?security=tls".to_string(),
+            "hy2://password@example.com:443".to_string(),
+        ];
+        for url in urls {
+            assert_eq!(parse_proxy_url(&url).unwrap()["skip-cert-verify"], false);
+        }
+    }
+
+    #[test]
+    fn imported_links_preserve_explicit_verification_settings() {
+        for (value, expected) in [("1", true), ("0", false), ("true", true), ("false", false)] {
+            for prefix in ["trojan://password", "vless://id", "hy2://password"] {
+                let url = format!("{}@example.com:443?insecure={}", prefix, value);
+                assert_eq!(parse_proxy_url(&url).unwrap()["skip-cert-verify"], expected);
+            }
+        }
+        for value in [
+            serde_json::json!(true),
+            serde_json::json!(1),
+            serde_json::json!("true"),
+        ] {
+            assert_eq!(
+                parse_proxy_url(&vmess_url(Some(("allowInsecure", value)))).unwrap()
+                    ["skip-cert-verify"],
+                true
+            );
+        }
+        assert_eq!(
+            parse_proxy_url("trojan://password@example.com:443?allowInsecure=1").unwrap()
+                ["skip-cert-verify"],
+            true
+        );
+        assert_eq!(
+            parse_proxy_url("vless://id@example.com:443?skip-cert-verify=1").unwrap()
+                ["skip-cert-verify"],
+            true
+        );
+    }
+
+    #[test]
+    fn invalid_or_conflicting_verification_settings_are_rejected() {
+        for query in ["insecure=yes", "insecure=2", "insecure=1&allowInsecure=0"] {
+            assert!(parse_proxy_url(&format!("hy2://password@example.com:443?{}", query)).is_err());
+        }
+        assert!(parse_proxy_url(&vmess_url(Some((
+            "allowInsecure",
+            serde_json::json!("yes")
+        ))))
+        .is_err());
+    }
+
+    #[test]
+    fn yaml_subscriptions_keep_explicit_verification_settings() {
+        let proxies = parse_subscription_content("proxies:\n  - name: trusted-custom\n    type: trojan\n    server: example.com\n    port: 443\n    password: password\n    skip-cert-verify: true\n").unwrap();
+        assert_eq!(proxies[0]["skip-cert-verify"], true);
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    struct TestStore {
+        store: SubscriptionStore,
+        root: PathBuf,
+    }
+    impl TestStore {
+        fn new() -> Self {
+            let root =
+                std::env::temp_dir().join(format!("mihomo-subscriptions-test-{}", Uuid::new_v4()));
+            fs::create_dir_all(&root).unwrap();
+            Self {
+                store: SubscriptionStore {
+                    path: root.join("data/subscriptions.json"),
+                    profiles_dir: root.join("profiles"),
+                },
+                root,
+            }
+        }
+    }
+    impl Drop for TestStore {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn subscription(id: &str, token: &str) -> Subscription {
+        Subscription {
+            id: id.into(),
+            name: id.into(),
+            url: "https://example.com/subscription".into(),
+            user_agent: None,
+            use_proxy: false,
+            created_at: "created".into(),
+            last_updated: "updated".into(),
+            proxy_count: 1,
+            status: SubscriptionStatus::Updating,
+            last_error: None,
+            file: Some(format!("{}.yaml", id)),
+            update_token: Some(token.into()),
+        }
+    }
+
+    #[test]
+    fn missing_store_is_empty_but_damaged_store_is_never_overwritten() {
+        let test = TestStore::new();
+        assert!(test
+            .store
+            .lock(false, SubscriptionStore::read)
+            .unwrap()
+            .subscriptions
+            .is_empty());
+        fs::write(&test.store.path, "damaged data").unwrap();
+        let result = test.store.lock(true, |store| {
+            store.transaction(|_, storage| {
+                storage
+                    .subscriptions
+                    .insert("new".into(), subscription("new", "token"));
+                Ok(())
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(&test.store.path).unwrap(),
+            "damaged data"
+        );
+    }
+
+    #[test]
+    fn concurrent_transactions_keep_every_independent_subscription() {
+        let test = TestStore::new();
+        let barrier = Arc::new(Barrier::new(12));
+        let mut threads = Vec::new();
+        for index in 0..12 {
+            let store = SubscriptionStore {
+                path: test.store.path.clone(),
+                profiles_dir: test.store.profiles_dir.clone(),
+            };
+            let barrier = barrier.clone();
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                store
+                    .lock(true, |store| {
+                        store.transaction(|_, storage| {
+                            let id = index.to_string();
+                            storage
+                                .subscriptions
+                                .insert(id.clone(), subscription(&id, "token"));
+                            Ok(())
+                        })
+                    })
+                    .unwrap();
+            }));
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            test.store
+                .lock(false, SubscriptionStore::read)
+                .unwrap()
+                .subscriptions
+                .len(),
+            12
+        );
+    }
+
+    #[test]
+    fn stale_and_deleted_updates_cannot_replace_profiles_or_resurrect_entries() {
+        let test = TestStore::new();
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage
+                        .subscriptions
+                        .insert("node".into(), subscription("node", "newer"));
+                    Ok(())
+                })
+            })
+            .unwrap();
+        assert!(test
+            .store
+            .lock(true, |store| store
+                .commit_profile("node", "older", "stale", 2))
+            .is_err());
+        assert!(!test.store.profiles_dir.exists());
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage.subscriptions.remove("node");
+                    Ok(())
+                })
+            })
+            .unwrap();
+        assert!(test
+            .store
+            .lock(true, |store| store
+                .commit_profile("node", "newer", "deleted", 2))
+            .is_err());
+        assert!(test.store.read().unwrap().subscriptions.is_empty());
+        assert!(!test.store.profiles_dir.exists());
+    }
+
+    #[test]
+    fn metadata_commit_failure_keeps_old_profile_and_discards_candidate() {
+        let test = TestStore::new();
+        let old = subscription("node", "token");
+        atomic_write(&test.store.profile_path(&old).unwrap(), b"old profile").unwrap();
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage.subscriptions.insert("node".into(), old.clone());
+                    Ok(())
+                })
+            })
+            .unwrap();
+        let original = fs::read(&test.store.path).unwrap();
+        let result = test.store.lock(true, |store| {
+            store.commit_profile_using("node", "token", "new profile", 2, |_| {
+                Err(anyhow::anyhow!("injected metadata failure"))
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&test.store.path).unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(test.store.profile_path(&old).unwrap()).unwrap(),
+            "old profile"
+        );
+        assert_eq!(fs::read_dir(&test.store.profiles_dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn profile_commit_switches_reference_and_content_together() {
+        let test = TestStore::new();
+        let old = subscription("node", "token");
+        atomic_write(&test.store.profile_path(&old).unwrap(), b"old profile").unwrap();
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage.subscriptions.insert("node".into(), old.clone());
+                    Ok(())
+                })
+            })
+            .unwrap();
+        test.store
+            .lock(true, |store| {
+                store.commit_profile("node", "token", "new profile", 2)
+            })
+            .unwrap();
+        test.store
+            .lock(false, |store| {
+                let storage = store.read()?;
+                let updated = &storage.subscriptions["node"];
+                assert_eq!(updated.proxy_count, 2);
+                assert!(updated.status == SubscriptionStatus::Active);
+                assert_eq!(
+                    fs::read_to_string(store.profile_path(updated)?).unwrap(),
+                    "new profile"
+                );
+                assert!(store.profile_path(&old)?.exists());
+                Ok(())
+            })
+            .unwrap();
+    }
+    #[test]
+    fn stale_configuration_snapshot_never_reaches_commit() {
+        let test = TestStore::new();
+        let revision = serde_json::to_value(test.store.read().unwrap()).unwrap();
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage
+                        .subscriptions
+                        .insert("new".into(), subscription("new", "token"));
+                    Ok(())
+                })
+            })
+            .unwrap();
+        let committed = test
+            .store
+            .lock(true, |store| {
+                store.commit_if_current(&revision, || panic!("stale configuration committed"))
+            })
+            .unwrap();
+        assert!(!committed);
+        let latest = serde_json::to_value(test.store.read().unwrap()).unwrap();
+        let mut reached_commit = false;
+        assert!(test
+            .store
+            .lock(true, |store| store.commit_if_current(&latest, || {
+                reached_commit = true;
+                Ok(())
+            }))
+            .unwrap());
+        assert!(reached_commit);
+    }
+
+    #[test]
+    fn existing_metadata_backup_keeps_its_profile_after_later_updates() {
+        let test = TestStore::new();
+        let old = subscription("node", "token");
+        atomic_write(
+            &test.store.profile_path(&old).unwrap(),
+            b"backed-up profile",
+        )
+        .unwrap();
+        test.store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    storage.subscriptions.insert("node".into(), old.clone());
+                    Ok(())
+                })
+            })
+            .unwrap();
+        let backup_dir = test.root.join("backups");
+        let backup = test
+            .store
+            .lock(false, |store| store.backup_to(&backup_dir, "subscriptions"))
+            .unwrap();
+        test.store
+            .lock(true, |store| {
+                store.commit_profile("node", "token", "current profile", 2)
+            })
+            .unwrap();
+        let restored: SubscriptionStorage =
+            serde_json::from_slice(&fs::read(backup_dir.join(backup)).unwrap()).unwrap();
+        assert_eq!(
+            fs::read_to_string(
+                test.store
+                    .profile_path(&restored.subscriptions["node"])
+                    .unwrap()
+            )
+            .unwrap(),
+            "backed-up profile"
+        );
+    }
+
+    #[test]
+    fn non_ascii_subscription_content_does_not_slice_inside_utf8() {
+        let content = "中文订阅内容".repeat(30);
+        assert!(parse_subscription_content(&content).is_err());
+    }
+    #[test]
+    fn storage_lock_worker() {
+        let Some(root) = std::env::var_os("MIHOMO_SUBSCRIPTION_LOCK_TEST_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let store = SubscriptionStore {
+            path: root.join("data/subscriptions.json"),
+            profiles_dir: root.join("profiles"),
+        };
+        fs::write(root.join("writer-ready"), b"ready").unwrap();
+        store
+            .lock(true, |store| {
+                store.transaction(|_, storage| {
+                    assert!(
+                        root.join("config-committed").exists(),
+                        "writer entered before configuration commit completed"
+                    );
+                    storage
+                        .subscriptions
+                        .insert("child".into(), subscription("child", "token"));
+                    Ok(())
+                })
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn configuration_check_and_commit_exclude_cross_process_mutations() {
+        let test = TestStore::new();
+        let revision = serde_json::to_value(test.store.read().unwrap()).unwrap();
+        let mut child = None;
+        test.store
+            .lock(true, |store| {
+                store.commit_if_current(&revision, || {
+                    let process = std::process::Command::new(std::env::current_exe().unwrap())
+                        .args([
+                            "--exact",
+                            "subscription::storage_tests::storage_lock_worker",
+                        ])
+                        .env("MIHOMO_SUBSCRIPTION_LOCK_TEST_ROOT", &test.root)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap();
+                    child = Some(process);
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                    while !test.root.join("writer-ready").exists() {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "child writer did not become ready"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    assert!(child.as_mut().unwrap().try_wait().unwrap().is_none());
+                    fs::write(test.root.join("config-committed"), b"committed").unwrap();
+                    Ok(())
+                })
+            })
+            .unwrap();
+        assert!(child.unwrap().wait().unwrap().success());
+        assert!(test
+            .store
+            .read()
+            .unwrap()
+            .subscriptions
+            .contains_key("child"));
     }
 }

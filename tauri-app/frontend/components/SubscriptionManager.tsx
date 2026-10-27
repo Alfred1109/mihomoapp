@@ -60,6 +60,11 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
   const lastSubscriptionUpdate = useAppStore((state) => state.lastSubscriptionUpdate);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [updatingIds, setUpdatingIds] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -79,7 +84,10 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
     try {
       const data = await invoke<Subscription[]>('get_subscriptions');
       setSubscriptions(data);
+      setLoadError(false);
+      setLoaded(true);
     } catch (error) {
+      setLoadError(true);
       showNotification(`${t('subscription.loadFailed')}: ${error}`, 'error');
     } finally {
       setLoading(false);
@@ -100,6 +108,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       showNotification(t('subscription.fillRequired'), 'error');
       return;
     }
+    if (adding) return;
+    setAdding(true);
     try {
       await invoke('add_subscription', {
         name: newSubscription.name,
@@ -113,21 +123,29 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       loadSubscriptions();
     } catch (error) {
       showNotification(`${t('subscription.addFailed')}: ${error}`, 'error');
+    } finally {
+      setAdding(false);
     }
   };
 
   const handleUpdateSubscription = async (id: string) => {
+    if (updatingIds.includes(id)) return;
+    setUpdatingIds(current => [...current, id]);
     try {
       await invoke('update_subscription', { id });
       showNotification(t('subscription.updateSuccess'), 'success');
       loadSubscriptions();
     } catch (error) {
       showNotification(`${t('subscription.updateFailed')}: ${error}`, 'error');
+      await loadSubscriptions();
+    } finally {
+      setUpdatingIds(current => current.filter(item => item !== id));
     }
   };
 
   const handleDeleteSubscription = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     try {
       await invoke('delete_subscription', { id: deleteTarget.id });
       showNotification(t('subscription.deleteSuccess'), 'success');
@@ -136,6 +154,8 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
       loadSubscriptions();
     } catch (error) {
       showNotification(`${t('subscription.deleteFailed')}: ${error}`, 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -255,7 +275,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 3 }}>
         <Typography variant="h5">{t('subscription.title')}</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button variant="outlined" startIcon={<Refresh />} onClick={loadSubscriptions} disabled={loading}>
@@ -271,7 +291,15 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          {subscriptions.length === 0 ? (
+          {loadError && !loaded ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Error sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
+              <Typography variant="h6" gutterBottom>{t('subscription.loadFailed')}</Typography>
+              <Button variant="outlined" startIcon={<Refresh />} onClick={loadSubscriptions} disabled={loading}>{t('subscription.refresh')}</Button>
+            </Box>
+          ) : !loaded ? (
+            <Box sx={{ py: 4 }} />
+          ) : subscriptions.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Link sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
               <Typography variant="h6" gutterBottom>{t('subscription.noSubscriptions')}</Typography>
@@ -309,7 +337,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                       </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                          <Chip label={subscription.status} color={getStatusColor(subscription.status)} size="small" />
+                          <Chip label={t(`subscription.status${subscription.status}`, { defaultValue: subscription.status })} color={getStatusColor(subscription.status)} size="small" />
                           <Chip label={subscription.use_proxy ? t('subscription.useProxyLabel') : t('subscription.directLabel')} size="small" variant="outlined"
                             color={subscription.use_proxy ? 'primary' : 'default'} />
                           {subscription.last_error && (
@@ -323,10 +351,10 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
                       <TableCell>{formatDate(subscription.last_updated)}</TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1 }}>
-                          <IconButton size="small" onClick={() => handleUpdateSubscription(subscription.id)} title={t('subscription.update')}>
+                          <IconButton size="small" onClick={() => handleUpdateSubscription(subscription.id)} disabled={updatingIds.includes(subscription.id)} aria-label={t('subscription.update')} title={t('subscription.update')}>
                             <Refresh />
                           </IconButton>
-                          <IconButton size="small" color="error" title={t('subscription.delete')}
+                          <IconButton size="small" color="error" title={t('subscription.delete')} aria-label={t('subscription.delete')} disabled={updatingIds.includes(subscription.id)}
                             onClick={() => { setDeleteTarget({ id: subscription.id, name: subscription.name }); setDeleteDialogOpen(true); }}>
                             <Delete />
                           </IconButton>
@@ -393,7 +421,7 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={() => { if (!adding) setDialogOpen(false); }} maxWidth="sm" fullWidth>
         <DialogTitle>{t('subscription.addDialogTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{ mb: 2 }}>{t('subscription.addDialogDesc')}</DialogContentText>
@@ -409,19 +437,19 @@ const SubscriptionManager: React.FC<SubscriptionManagerProps> = React.memo(({ sh
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{t('subscription.useProxyDesc')}</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>{t('subscription.cancel')}</Button>
-          <Button onClick={handleAddSubscription} variant="contained">{t('subscription.add')}</Button>
+          <Button disabled={adding} onClick={() => setDialogOpen(false)}>{t('subscription.cancel')}</Button>
+          <Button onClick={handleAddSubscription} disabled={adding} variant="contained">{t('subscription.add')}</Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <Dialog open={deleteDialogOpen} onClose={() => { if (!deleting) setDeleteDialogOpen(false); }}>
         <DialogTitle>{t('subscription.confirmDelete')}</DialogTitle>
         <DialogContent>
           <DialogContentText>{t('subscription.confirmDeleteDesc', { name: deleteTarget?.name })}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
-          <Button variant="contained" color="error" onClick={handleDeleteSubscription}>{t('common.confirm')}</Button>
+          <Button disabled={deleting} onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
+          <Button variant="contained" color="error" disabled={deleting} onClick={handleDeleteSubscription}>{t('common.confirm')}</Button>
         </DialogActions>
       </Dialog>
 

@@ -33,7 +33,9 @@ pub async fn load_base_config() -> Result<Value> {
         return Ok(default_config);
     }
 
-    let config = crate::config::yaml_to_json(&yaml_docs[0]).context("转换基础配置为 JSON 失败")?;
+    let mut config =
+        crate::config::yaml_to_json(&yaml_docs[0]).context("转换基础配置为 JSON 失败")?;
+    mihomoapp::config_compat::normalize_base_config(&mut config)?;
 
     info!("基础配置加载成功");
     Ok(config)
@@ -46,8 +48,10 @@ pub async fn save_base_config(config: &Value) -> Result<()> {
         fs::create_dir_all(parent).context("创建配置目录失败")?;
     }
 
+    let mut candidate = config.clone();
+    mihomoapp::config_compat::normalize_base_config(&mut candidate)?;
     let yaml_value: serde_yaml::Value =
-        serde_json::from_value(config.clone()).context("转换配置格式失败")?;
+        serde_json::from_value(candidate).context("转换配置格式失败")?;
 
     let yaml_content = serde_yaml::to_string(&yaml_value).context("序列化 YAML 失败")?;
 
@@ -92,7 +96,7 @@ pub fn create_default_base_config() -> Value {
         "tcp-concurrent": true,
         "keep-alive-interval": 30,
         "find-process-mode": "strict",
-        "global-client-fingerprint": "chrome",
+        "mihomo-manager-default-client-fingerprint": "chrome",
         "dns": {
             "enable": true,
             "prefer-h3": true,
@@ -213,6 +217,7 @@ pub async fn merge_with_proxies(proxies: Vec<Value>, proxy_names: Vec<String>) -
 
     config["config_version"] = serde_json::json!(2);
 
+    mihomoapp::config_compat::normalize_runtime_config(&mut config)?;
     info!("已合并基础配置和代理节点");
     Ok(config)
 }

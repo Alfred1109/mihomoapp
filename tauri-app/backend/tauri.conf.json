@@ -81,9 +81,17 @@
       "targets": ["deb", "msi", "nsis"],
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
           "libayatana-appindicator3-1",
-          "libgtk-3-0"
+          "libc6 (>= 2.34)",
+          "libcairo2 (>= 1.10.0)",
+          "libgcc-s1 (>= 4.2)",
+          "libgdk-pixbuf-2.0-0 (>= 2.36.9)",
+          "libglib2.0-0 (>= 2.35.8)",
+          "libgtk-3-0 (>= 3.21.4)",
+          "libjavascriptcoregtk-4.0-18",
+          "libsoup2.4-1 (>= 2.4.0)",
+          "libssl3 (>= 3.0.0)",
+          "libwebkit2gtk-4.0-37 (>= 2.21.1)"
         ],
         "desktopTemplate": "mihomoapp.desktop"
       },
